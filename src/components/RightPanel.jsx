@@ -74,6 +74,20 @@ function Section({ icon: Icon, title, hint, children }) {
   )
 }
 
+// La tecla que indica a esa persona o mascota: se dibuja como una tecla de verdad para que se lea de un vistazo
+function KeyCap({ active, children }) {
+  return (
+    <kbd
+      aria-hidden
+      className={`grid size-6 place-items-center rounded-md border border-b-2 font-sans text-base font-bold leading-none ${
+        active ? 'border-black/30 bg-black/25 text-sobre-tag' : 'border-suave/50 bg-panel text-tinta'
+      }`}
+    >
+      {children}
+    </kbd>
+  )
+}
+
 // Los ocho colores para elegir
 function ColorPicker({ current, name, onPick }) {
   return (
@@ -157,18 +171,13 @@ function TagSection({ kind, title, hint, empty, label, placeholder, tags, number
                 aria-pressed={active}
                 title={key ? `Atajo: tecla ${key}` : undefined}
                 onClick={() => actions.onToggle(tag.id)}
-                className="flex items-center gap-1.5 rounded-full py-1 pl-3 pr-2 disabled:cursor-default"
+                className={`flex items-center gap-1.5 rounded-full py-1 pr-2.5 disabled:cursor-default ${
+                  key ? 'pl-1.5' : 'pl-3'
+                }`}
               >
+                {key && <KeyCap active={active}>{key}</KeyCap>}
                 {!active && <span aria-hidden style={{ background: color }} className="size-2.5 rounded-full" />}
                 {tag.name}
-                {key && (
-                  <kbd
-                    aria-hidden
-                    className={`rounded px-1 text-xs ${active ? 'bg-black/20' : 'bg-linea/60 text-suave'}`}
-                  >
-                    {key}
-                  </kbd>
-                )}
               </button>
               <button
                 type="button"
@@ -263,7 +272,7 @@ function RightPanel({ image, canEdit, library, numbered, actions }) {
         {...shared}
         kind="persona"
         title="Personas"
-        hint="Quién sale en la foto. Sirve para buscar."
+        hint="Quién sale en la foto. Pulsa su número en el teclado para indicarla."
         empty="Todavía no hay personas. Crea la primera."
         label="Nueva persona"
         placeholder="Nombre de la persona"
