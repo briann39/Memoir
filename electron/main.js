@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -25,16 +25,20 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ])
 
+// Un archivo que solo está en la nube (iCloud, OneDrive) tiene tamaño pero no ocupa espacio en disco.
+// Consultar sus metadatos no lo descarga; abrirlo sí.
+const isCloudOnly = (stat) => process.platform === 'win32' && stat.size > 0 && stat.blocks === 0
+
 // Imágenes (sin subcarpetas) de una carpeta, ya filtradas por tamaño
 async function imagesIn(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true })
   const names = entries.filter((e) => e.isFile() && isImage(e.name)).map((e) => e.name)
-  const sizes = await Promise.all(
-    names.map((n) => fs.stat(path.join(dir, n)).then((s) => s.size).catch(() => 0)),
-  )
+  const stats = await Promise.all(names.map((n) => fs.stat(path.join(dir, n)).catch(() => null)))
   return names
-    .filter((_, i) => sizes[i] >= MIN_BYTES)
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    .map((name, i) => ({ name, stat: stats[i] }))
+    .filter(({ stat }) => stat && stat.size >= MIN_BYTES)
+    .map(({ name, stat }) => ({ name, cloud: isCloudOnly(stat) }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
 }
 
 let currentScan = null
@@ -53,6 +57,7 @@ async function scan(sender, roots) {
   const timer = setInterval(flush, 300)
 
   const queue = [...roots]
+  const seen = new Set(roots.map((r) => r.toLowerCase())) // evita repetir carpetas y bucles de enlaces
   for (let i = 0; i < queue.length && !token.cancelled; i++) {
     const dir = queue[i]
     let entries
@@ -62,9 +67,24 @@ async function scan(sender, roots) {
       continue // sin permisos o no existe
     }
     for (const e of entries) {
-      if (e.isDirectory() && !e.isSymbolicLink() && !shouldSkip(e.name)) {
-        queue.push(path.join(dir, e.name))
+      if (shouldSkip(e.name)) continue
+      const full = path.join(dir, e.name)
+      let target = full
+      if (e.isSymbolicLink()) {
+        // iCloud Photos expone su carpeta de fotos como enlace
+        try {
+          if (!(await fs.stat(full)).isDirectory()) continue
+          target = await fs.realpath(full)
+        } catch {
+          continue
+        }
+      } else if (!e.isDirectory()) {
+        continue
       }
+      const key = target.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      queue.push(full)
     }
     try {
       const imgs = await imagesIn(dir)
@@ -73,7 +93,6 @@ async function scan(sender, roots) {
           path: dir,
           name: path.basename(dir) || dir,
           count: imgs.length,
-          cover: mediaUrl(path.join(dir, imgs[0])),
         })
       }
     } catch {
@@ -156,11 +175,27 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('read-folder', async (_event, folder) => {
-    const names = await imagesIn(folder)
-    return names.map((name) => {
+    const imgs = await imagesIn(folder)
+    return imgs.map(({ name, cloud }) => {
       const full = path.join(folder, name)
-      return { id: full, name, url: mediaUrl(full) }
+      return { id: full, name, url: mediaUrl(full), cloud }
     })
+  })
+
+  // Estado de una foto sin abrirla: si existe y si solo está en la nube
+  ipcMain.handle('file-info', async (_event, file) => {
+    if (!isImage(file)) return { exists: false, cloud: false }
+    try {
+      return { exists: true, cloud: isCloudOnly(await fs.stat(file)) }
+    } catch {
+      return { exists: false, cloud: false }
+    }
+  })
+
+  // Manda la foto a la Papelera de reciclaje. En una carpeta sincronizada, la nube también la elimina.
+  ipcMain.handle('trash-file', async (_event, file) => {
+    if (!path.isAbsolute(file) || !isImage(file)) throw new Error('Archivo no permitido')
+    await shell.trashItem(file)
   })
 
   createWindow()

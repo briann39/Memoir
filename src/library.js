@@ -72,6 +72,17 @@ export function toggleImageTag(lib, file, tagId) {
   return { ...lib, imageTags }
 }
 
+// Quita una foto eliminada de todos los álbumes y etiquetas
+export function forgetImage(lib, file) {
+  const imageTags = { ...lib.imageTags }
+  delete imageTags[file]
+  return {
+    ...lib,
+    imageTags,
+    albums: lib.albums.map((a) => ({ ...a, images: a.images.filter((f) => f !== file) })),
+  }
+}
+
 // Carpetas descartadas del visor (no se borran del disco)
 export function hideFolder(lib, folder) {
   return lib.hiddenFolders.includes(folder) ? lib : { ...lib, hiddenFolders: [...lib.hiddenFolders, folder] }

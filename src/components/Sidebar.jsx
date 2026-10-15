@@ -97,11 +97,16 @@ function Sidebar({
                     draggable={f.path !== '__loose__'}
                     onDragStart={(e) => startImageDrag(e, img.id)}
                     onClick={() => onPick(f.path, i)}
-                    className={`block w-full truncate rounded px-3 py-1 text-left text-xs transition hover:bg-slate-800 ${
+                    className={`flex w-full items-center gap-1 rounded px-3 py-1 text-left text-xs transition hover:bg-slate-800 ${
                       active ? 'bg-slate-800 text-sky-400' : 'text-slate-300'
                     }`}
                   >
-                    {img.name}
+                    <span className="min-w-0 flex-1 truncate">{img.name}</span>
+                    {img.cloud && (
+                      <span title="Solo en la nube" aria-label="Solo en la nube">
+                        ☁️
+                      </span>
+                    )}
                   </button>
                 </li>
               )

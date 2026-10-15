@@ -7,6 +7,7 @@ import {
   addTag,
   addToAlbum,
   EMPTY_LIBRARY,
+  forgetImage,
   hideFolder,
   imageFromPath,
   loadLibrary,
@@ -191,6 +192,32 @@ function App() {
 
   const dropInAlbum = (albumId, file) => setLibrary((l) => addToAlbum(l, albumId, file))
 
+  // Manda la foto a la Papelera. Si la carpeta está sincronizada con la nube, allí también se elimina.
+  const deleteImage = async () => {
+    if (!current || selected.key === LOOSE) return
+    const file = current.id
+    const aviso = `¿Eliminar "${current.name}"?
+
+Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, también se eliminará de iCloud.`
+    if (!window.confirm(aviso)) return
+    try {
+      await api.trashFile(file)
+    } catch {
+      window.alert('No se pudo eliminar la foto.')
+      return
+    }
+    const restantes = images.filter((i) => i.id !== file).length
+    const folder = file.replace(/[\\/][^\\/]*$/, '')
+    setFilesByKey((prev) =>
+      Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.filter((i) => i.id !== file)])),
+    )
+    setFolders((prev) =>
+      prev.map((f) => (f.path === folder ? { ...f, count: f.count - 1 } : f)).filter((f) => f.count > 0),
+    )
+    setLibrary((l) => forgetImage(l, file))
+    setSelected(restantes ? { key: selected.key, index: Math.min(selected.index, restantes - 1) } : null)
+  }
+
   const canEdit = Boolean(current) && selected.key !== LOOSE
 
   return (
@@ -244,7 +271,8 @@ function App() {
             image={current}
             index={selected.index}
             total={images.length}
-            canDrag={canEdit}
+            persistent={canEdit}
+            onDelete={deleteImage}
             onPrev={prev}
             onNext={next}
           />
