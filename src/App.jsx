@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { cleanError } from './errors'
 import RightPanel from './components/RightPanel'
+import SendDialog from './components/SendDialog'
 import Sidebar from './components/Sidebar'
 import Viewer from './components/Viewer'
 import {
@@ -31,6 +33,7 @@ function App() {
   const [selected, setSelected] = useState(null) // { key, index }
   const [dragging, setDragging] = useState(false)
   const [sending, setSending] = useState(false)
+  const [sendDialog, setSendDialog] = useState(false)
   const [notice, setNotice] = useState(null)
   const [library, setLibrary] = useState(EMPTY_LIBRARY)
   const libraryLoaded = useRef(false)
@@ -217,21 +220,29 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
     removeFromViews(file)
   }
 
-  // Envía la foto al servidor y la mueve: sale de la lista igual que si se eliminara
-  const sendToServer = async () => {
+  // Abre el selector de carpeta del servidor (persona o animal) para la foto actual
+  const openSendDialog = () => {
     if (!current || selected.key === LOOSE || sending) return
     if (!library.serverFolder) {
       window.alert('Primero elige la carpeta del servidor en el panel derecho.')
       return
     }
+    setSendDialog(true)
+  }
+
+  // Envía la foto a la carpeta elegida y la mueve: sale de la lista igual que si se eliminara
+  const sendToServer = async (subfolder) => {
+    if (!current || selected.key === LOOSE || sending) return
+    setSendDialog(false)
     const { id: file, name } = current
     setSending(true)
     try {
-      await api.sendToServer(file, library.serverFolder, true)
+      await api.sendToServer(file, library.serverFolder, subfolder, true)
+      setLibrary((l) => ({ ...l, lastSubfolder: subfolder }))
       removeFromViews(file)
-      setNotice(`"${name}" enviada al servidor`)
+      setNotice(`"${name}" enviada a ${subfolder || 'la raíz del servidor'}`)
     } catch (err) {
-      window.alert(err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+      window.alert(cleanError(err))
     } finally {
       setSending(false)
     }
@@ -312,7 +323,7 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
             total={images.length}
             persistent={canEdit}
             onDelete={deleteImage}
-            onSend={api ? sendToServer : undefined}
+            onSend={api ? openSendDialog : undefined}
             sending={sending}
             onPrev={prev}
             onNext={next}
@@ -357,6 +368,15 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
         onAddAlbum={(name) => setLibrary((l) => addAlbum(l, name))}
         onRemoveAlbum={(albumId) => setLibrary((l) => removeAlbum(l, albumId))}
       />
+
+      {sendDialog && (
+        <SendDialog
+          serverFolder={library.serverFolder}
+          lastUsed={library.lastSubfolder}
+          onPick={sendToServer}
+          onClose={() => setSendDialog(false)}
+        />
+      )}
     </div>
   )
 }

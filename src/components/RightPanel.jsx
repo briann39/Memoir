@@ -170,8 +170,9 @@ function RightPanel({
             Elegir carpeta…
           </button>
           <p className="text-xs text-slate-500">
-            Carpeta de red o unidad donde "Enviar al servidor" guarda las fotos. La original va a la
-            Papelera una vez copiada.
+            Carpeta de red o unidad donde "Enviar al servidor" guarda las fotos. Al enviar eliges la
+            carpeta de la persona o el animal, o creas una nueva. La original va a la Papelera una
+            vez copiada.
           </p>
         </section>
       )}

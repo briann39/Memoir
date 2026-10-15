@@ -30,6 +30,26 @@ protocol.registerSchemesAsPrivileged([
 // Consultar sus metadatos no lo descarga; abrirlo sí.
 const isCloudOnly = (stat) => process.platform === 'win32' && stat.size > 0 && stat.blocks === 0
 
+// La carpeta del servidor debe ser una ruta absoluta a la que se pueda llegar
+async function checkServerDir(serverDir) {
+  if (!path.isAbsolute(serverDir)) throw new Error('Elige primero la carpeta del servidor.')
+  const stat = await fs.stat(serverDir).catch(() => null)
+  if (!stat?.isDirectory()) {
+    throw new Error('No se puede acceder a la carpeta del servidor. ¿Está encendido y conectado?')
+  }
+  return serverDir
+}
+
+// Nombre de una subcarpeta del servidor: sin rutas ni caracteres que Windows no admite
+function safeFolderName(name) {
+  const clean = String(name ?? '').trim()
+  if (!clean) return ''
+  if (clean.length > 100 || /[<>:"/\\|?*]/.test(clean) || /[. ]$/.test(clean)) {
+    throw new Error('Nombre de carpeta no válido. No uses / \\ : * ? " < > | ni termines en punto.')
+  }
+  return clean
+}
+
 // Imágenes (sin subcarpetas) de una carpeta, ya filtradas por tamaño
 async function imagesIn(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true })
@@ -205,16 +225,22 @@ app.whenReady().then(() => {
     }
   })
 
+  // Subcarpetas que ya existen en el servidor (una por persona o animal)
+  ipcMain.handle('server-folders', async (_event, serverDir) => {
+    const entries = await fs.readdir(await checkServerDir(serverDir), { withFileTypes: true })
+    return entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !e.name.startsWith('$'))
+      .map((e) => e.name)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  })
+
   // Copia la foto a la carpeta del servidor (una ruta de red o una unidad) y, si se pide, la mueve:
   // la original va a la Papelera solo cuando la copia quedó completa.
-  ipcMain.handle('send-to-server', async (_event, file, destDir, move) => {
-    if (!path.isAbsolute(file) || !isImage(file) || !path.isAbsolute(destDir)) {
-      throw new Error('Ruta no válida')
-    }
-    const dest = await fs.stat(destDir).catch(() => null)
-    if (!dest?.isDirectory()) {
-      throw new Error('No se puede acceder a la carpeta del servidor. ¿Está encendido y conectado?')
-    }
+  // subfolder: carpeta dentro del servidor (una persona, un animal…); vacío = la raíz. Se crea si no existe.
+  ipcMain.handle('send-to-server', async (_event, file, serverDir, subfolder, move) => {
+    if (!path.isAbsolute(file) || !isImage(file)) throw new Error('Ruta no válida')
+    const destDir = path.join(await checkServerDir(serverDir), safeFolderName(subfolder))
+    await fs.mkdir(destDir, { recursive: true })
     const ext = path.extname(file)
     const base = path.basename(file, ext)
     let target = path.join(destDir, base + ext)
