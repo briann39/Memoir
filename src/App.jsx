@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import Gallery from './components/Gallery'
 import Sidebar from './components/Sidebar'
+import Viewer from './components/Viewer'
 
 const api = window.electronAPI
+const LOOSE = '__loose__'
 
 function App() {
   const [folders, setFolders] = useState([])
   const [scanning, setScanning] = useState(Boolean(api)) // la app de escritorio escanea al iniciar
-  const [gallery, setGallery] = useState(null) // { path, title, subtitle, images, loose }
+  const [expanded, setExpanded] = useState(() => new Set())
+  const [filesByKey, setFilesByKey] = useState({}) // carpeta -> imágenes (se cargan al abrirla)
+  const [loose, setLoose] = useState([])
+  const [selected, setSelected] = useState(null) // { key, index }
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef(null)
 
@@ -36,6 +40,9 @@ function App() {
 
   const rescan = () => {
     setFolders([])
+    setExpanded(new Set())
+    setFilesByKey({})
+    setSelected(null)
     startScan()
   }
 
@@ -49,20 +56,35 @@ function App() {
     if (roots.length) startScan(roots)
   }
 
-  const releaseLoose = (g) => {
-    if (g?.loose) g.images.forEach((i) => URL.revokeObjectURL(i.url))
-  }
-
-  const openFolder = async (folder) => {
+  // Abre o cierra una carpeta en el explorador; sus imágenes se leen la primera vez
+  const toggleFolder = async (folder) => {
+    const abierta = expanded.has(folder.path)
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (abierta) next.delete(folder.path)
+      else next.add(folder.path)
+      return next
+    })
+    if (abierta || folder.path === LOOSE || filesByKey[folder.path]) return
     const images = await api.readFolder(folder.path)
-    releaseLoose(gallery)
-    setGallery({ path: folder.path, title: folder.name, subtitle: folder.path, images, loose: false })
+    setFilesByKey((prev) => ({ ...prev, [folder.path]: images }))
   }
 
-  const closeGallery = () => {
-    releaseLoose(gallery)
-    setGallery(null)
-  }
+  const filesOf = (key) => (key === LOOSE ? loose : filesByKey[key])
+  const images = selected ? filesOf(selected.key) : null
+  const current = images?.[selected.index]
+
+  const step = useCallback(
+    (delta) =>
+      setSelected((s) => {
+        if (!s) return s
+        const total = (s.key === LOOSE ? loose : filesByKey[s.key]).length
+        return { ...s, index: (s.index + delta + total) % total }
+      }),
+    [loose, filesByKey],
+  )
+  const prev = useCallback(() => step(-1), [step])
+  const next = useCallback(() => step(1), [step])
 
   const addFiles = (fileList) => {
     const nuevas = Array.from(fileList)
@@ -73,13 +95,9 @@ function App() {
         url: URL.createObjectURL(file),
       }))
     if (!nuevas.length) return
-    setGallery((prev) => ({
-      path: null,
-      title: 'Imágenes sueltas',
-      subtitle: null,
-      images: [...(prev?.loose ? prev.images : []), ...nuevas],
-      loose: true,
-    }))
+    setSelected({ key: LOOSE, index: loose.length })
+    setLoose((prev) => [...prev, ...nuevas])
+    setExpanded((prev) => new Set(prev).add(LOOSE))
   }
 
   const onDrop = (e) => {
@@ -102,10 +120,14 @@ function App() {
     >
       <Sidebar
         folders={folders}
+        looseCount={loose.length}
         scanning={scanning}
-        activePath={gallery?.path ?? null}
         canScan={Boolean(api)}
-        onSelect={openFolder}
+        expanded={expanded}
+        filesByKey={{ ...filesByKey, [LOOSE]: loose }}
+        selected={selected}
+        onToggle={toggleFolder}
+        onPick={(key, index) => setSelected({ key, index })}
         onStop={stop}
         onRescan={rescan}
         onAddFolder={addFolder}
@@ -123,14 +145,14 @@ function App() {
         }}
       />
 
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        {gallery ? (
-          <Gallery
-            key={gallery.path ?? 'sueltas'}
-            title={gallery.title}
-            subtitle={gallery.subtitle}
-            images={gallery.images}
-            onClose={gallery.loose ? closeGallery : undefined}
+      <main className="min-w-0 flex-1">
+        {current ? (
+          <Viewer
+            image={current}
+            index={selected.index}
+            total={images.length}
+            onPrev={prev}
+            onNext={next}
           />
         ) : (
           <div className="flex h-full p-6">
@@ -140,12 +162,10 @@ function App() {
               }`}
             >
               <p className="text-lg font-medium">
-                {api ? 'Selecciona una carpeta' : 'Arrastra imágenes aquí'}
+                {api ? 'Abre una carpeta y elige una foto' : 'Arrastra imágenes aquí'}
               </p>
               <p className="text-sm text-slate-400">
-                {api
-                  ? 'o arrastra imágenes a esta ventana'
-                  : 'o usa el botón "Abrir imágenes"'}
+                {api ? 'o arrastra imágenes a esta ventana' : 'o usa el botón "Abrir imágenes"'}
               </p>
             </div>
           </div>
