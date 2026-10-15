@@ -104,10 +104,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* El foco siempre se ve, también con el teclado */
-:focus-visible {
-  outline: 2px solid var(--acento);
-  outline-offset: 2px;
+/* El foco siempre se ve, también con el teclado. Va en la capa base para que una clase pueda quitarlo
+   en un contenedor que solo recibe el foco para empezar (como un cuadro de diálogo). */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--acento);
+    outline-offset: 2px;
+  }
 }
 
 ::selection {

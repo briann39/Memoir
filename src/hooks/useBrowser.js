@@ -77,6 +77,13 @@ export function useBrowser({ virtualFiles, filterResults }) {
   const invalidate = (dirs) =>
     setFilesByKey((prev) => Object.fromEntries(Object.entries(prev).filter(([dir]) => !dirs.has(dir))))
 
+  // Vuelve a leer una carpeta que ya se había abierto (por ejemplo, después de guardar una copia editada)
+  const reloadFolder = async (dir) => {
+    const fotos = await api.readFolder(dir)
+    setFilesByKey((prev) => (dir in prev ? { ...prev, [dir]: fotos } : prev))
+    return fotos
+  }
+
   // Quita fotos que ya no están en el disco de todas las listas y mantiene la selección en un sitio lógico
   const dropFiles = (files) => {
     const gone = new Set(files)
@@ -117,6 +124,7 @@ export function useBrowser({ virtualFiles, filterResults }) {
     addFiles,
     reset,
     invalidate,
+    reloadFolder,
     dropFiles,
     closeIfIn,
   }

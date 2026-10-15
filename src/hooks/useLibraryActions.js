@@ -6,7 +6,9 @@ import {
   hideFolder,
   removeAlbum,
   removeTag,
+  resetSettings,
   restoreFolder,
+  setSetting,
   setTagColor,
   toggleImageTag,
   toggleInAlbum,
@@ -27,6 +29,9 @@ export function useLibraryActions(setLibrary, file) {
     addAlbum: (name) => update((l) => addAlbum(l, name)),
     removeAlbum: (albumId) => update((l) => removeAlbum(l, albumId)),
     dropInAlbum: (albumId, dropped) => update((l) => addToAlbum(l, albumId, dropped)),
+
+    setSetting: (key, value) => update((l) => setSetting(l, key, value)),
+    resetSettings: () => update(resetSettings),
 
     hideFolder: (folder) => update((l) => hideFolder(l, folder)),
     restoreFolder: (folder) => update((l) => restoreFolder(l, folder)),

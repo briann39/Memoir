@@ -12,8 +12,13 @@ const realpathNative = promisify(realpathCallback.native)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const devUrl = process.env.VITE_DEV_SERVER_URL
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.avif'])
-// Ignora iconos y miniaturas muy pequeñas
-const MIN_BYTES = 10 * 1024
+// Ajustes que el usuario cambia en Configuración y que la búsqueda necesita conocer
+const settings = {
+  minBytes: 10 * 1024, // ignora iconos y miniaturas más pequeños que esto
+}
+// Formatos que se pueden editar (se reescriben desde cero, así que no los animados ni los poco comunes)
+const EDITABLE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp'])
+const MAX_EDIT_BYTES = 120 * 1024 * 1024
 // Carpetas del sistema o de aplicaciones que no contienen fotos del usuario
 const SKIP_DIRS = new Set([
   'appdata', 'application data', 'local settings', 'node_modules', '$recycle.bin',
@@ -73,7 +78,7 @@ async function imagesIn(dir) {
   const stats = await Promise.all(names.map((n) => fs.stat(path.join(dir, n)).catch(() => null)))
   return names
     .map((name, i) => ({ name, stat: stats[i] }))
-    .filter(({ stat }) => stat && stat.size >= MIN_BYTES)
+    .filter(({ stat }) => stat && stat.size >= settings.minBytes)
     .map(({ name, stat }) => ({ name, cloud: isCloudOnly(stat, path.join(dir, name)) }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
 }
@@ -324,6 +329,55 @@ app.whenReady().then(() => {
     const real = await realpathNative(file).catch(() => file)
     if (real.startsWith('\\\\')) throw new Error('Las fotos del servidor no se pueden eliminar desde la app.')
     await shell.trashItem(file)
+  })
+
+  // Configuración: el tema (afecta a prefers-color-scheme de la página) y el tamaño mínimo de las fotos
+  ipcMain.handle('settings-apply', (_event, incoming) => {
+    if (Number.isFinite(incoming?.minKb)) settings.minBytes = Math.round(Math.min(Math.max(incoming.minKb, 0), 100000) * 1024)
+    if (['system', 'light', 'dark'].includes(incoming?.theme)) nativeTheme.themeSource = incoming.theme
+  })
+
+  ipcMain.handle('open-data-folder', () => shell.openPath(app.getPath('userData')))
+
+  // Lee una foto para editarla en la página (así funciona igual con unidades de red)
+  ipcMain.handle('read-image', async (_event, file) => {
+    if (!path.isAbsolute(file) || !EDITABLE_EXT.has(path.extname(file).toLowerCase())) {
+      throw new Error('Solo se pueden editar fotos JPG, PNG y WebP.')
+    }
+    const stat = await fs.stat(file)
+    if (stat.size > MAX_EDIT_BYTES) throw new Error('La foto es demasiado grande para editarla.')
+    return fs.readFile(file)
+  })
+
+  // Guarda la foto editada. 'copy': un archivo nuevo al lado de la original (la original no se toca).
+  // 'replace': la original va a la Papelera (se puede recuperar) y la editada ocupa su sitio; en una
+  // carpeta de red no hay Papelera, así que ahí solo se permite guardar una copia.
+  ipcMain.handle('save-image', async (_event, file, mode, bytes) => {
+    const ext = path.extname(file).toLowerCase()
+    if (!path.isAbsolute(file) || !EDITABLE_EXT.has(ext)) throw new Error('Archivo no permitido')
+    const data = Buffer.from(bytes)
+    if (!data.length || data.length > MAX_EDIT_BYTES) throw new Error('La foto editada no es válida.')
+
+    if (mode === 'replace') {
+      const real = await realpathNative(file).catch(() => file)
+      if (real.startsWith('\\\\')) throw new Error('En el servidor no se puede reemplazar la original. Guarda una copia.')
+      await shell.trashItem(file)
+      try {
+        await fs.writeFile(file, data)
+      } catch {
+        throw new Error('La original está en la Papelera, pero no se pudo guardar la foto editada.')
+      }
+      return file
+    }
+
+    const dir = path.dirname(file)
+    const base = path.basename(file, path.extname(file))
+    let target = path.join(dir, `${base} (editada)${path.extname(file)}`)
+    for (let n = 2; await fs.stat(target).then(() => true, () => false); n++) {
+      target = path.join(dir, `${base} (editada ${n})${path.extname(file)}`)
+    }
+    await fs.writeFile(target, data, { flag: 'wx' })
+    return target
   })
 
   createWindow()

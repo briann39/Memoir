@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 
-// Las carpetas con fotos que se encuentran en este equipo. La búsqueda empieza sola al abrir la app.
-export function usePcFolders() {
+// Las carpetas con fotos que se encuentran en este equipo. startup: los ajustes al abrir la app
+// (si hay que buscar y dónde); settings: los ajustes actuales, que usa «Buscar de nuevo».
+export function usePcFolders({ startup, settings }) {
   const [folders, setFolders] = useState([])
   const [scanning, setScanning] = useState(Boolean(api))
 
+  // Sin carpetas elegidas se busca en la carpeta del usuario
   const start = useCallback((roots) => {
     setScanning(true)
-    api.startScan(roots, 'pc')
+    api.startScan(roots?.length ? roots : undefined, 'pc')
   }, [])
 
+  // Avisos de la búsqueda
   useEffect(() => {
     if (!api) return
     const offBatch = api.onScanBatch((channel, lote) => {
@@ -21,17 +24,23 @@ export function usePcFolders() {
       })
     })
     const offDone = api.onScanDone((channel) => channel === 'pc' && setScanning(false))
-    api.startScan(undefined, 'pc')
     return () => {
       offBatch()
       offDone()
-      api.stopScan('pc')
     }
   }, [])
 
+  // La búsqueda inicial, cuando ya se conocen los ajustes
+  useEffect(() => {
+    if (!api || !startup) return
+    if (startup.scanOnStart) api.startScan(startup.scanRoots.length ? startup.scanRoots : undefined, 'pc')
+    else queueMicrotask(() => setScanning(false))
+    return () => api.stopScan('pc')
+  }, [startup])
+
   const rescan = () => {
     setFolders([])
-    start()
+    start(settings.scanRoots)
   }
 
   const stop = () => {
@@ -58,5 +67,8 @@ export function usePcFolders() {
         .filter((f) => f.count > 0)
     })
 
-  return { folders, scanning, rescan, stop, addFolder, removeCounts }
+  // Suma una foto nueva (por ejemplo la copia de una edición) a su carpeta, si la carpeta ya está en la lista
+  const addCount = (dir) => setFolders((prev) => prev.map((f) => (f.path === dir ? { ...f, count: f.count + 1 } : f)))
+
+  return { folders, scanning, rescan, stop, addFolder, removeCounts, addCount }
 }

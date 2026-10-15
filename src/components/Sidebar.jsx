@@ -8,6 +8,7 @@ import {
   ImagePlus,
   Images,
   Keyboard,
+  Settings,
   PawPrint,
   RotateCw,
   Search,
@@ -62,7 +63,7 @@ function TextButton({ onClick, icon: Icon, children }) {
 //   pc: carpetas del equipo · server: álbumes del servidor · people: buscar por personas
 //   collections: fotos sueltas, álbumes y etiquetas · tree: qué está abierto y qué foto se ve
 //   ops: enviar y eliminar fotos en lote
-function Sidebar({ pc, server, people: peopleFilter, collections, tree, ops, onOpenFiles, onShowShortcuts }) {
+function Sidebar({ pc, server, people: peopleFilter, collections, tree, ops, onOpenFiles, onShowShortcuts, onShowSettings }) {
   const { folders, hiddenFolders, scanning, canScan, onStop, onRescan, onAddFolder, onHide, onRestore } = pc
   const { folders: serverFolders, state: serverState, error: serverError, onRetry: onRetryServer } = server
   const {
@@ -452,14 +453,24 @@ function Sidebar({ pc, server, people: peopleFilter, collections, tree, ops, onO
           </div>
         )}
 
-        <button
-          type="button"
-          onClick={onShowShortcuts}
-          className="flex items-center gap-2 rounded px-1 py-0.5 text-sm text-suave transition hover:text-tinta"
-        >
-          <Keyboard size={14} aria-hidden />
-          Atajos de teclado
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={onShowSettings}
+            className="flex items-center gap-2 rounded px-1 py-0.5 text-sm text-suave transition hover:text-tinta"
+          >
+            <Settings size={14} aria-hidden />
+            Configuración
+          </button>
+          <button
+            type="button"
+            onClick={onShowShortcuts}
+            className="flex items-center gap-2 rounded px-1 py-0.5 text-sm text-suave transition hover:text-tinta"
+          >
+            <Keyboard size={14} aria-hidden />
+            Atajos
+          </button>
+        </div>
       </div>
     </aside>
   )

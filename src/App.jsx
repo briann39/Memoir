@@ -6,11 +6,14 @@ import { FILTER } from './keys'
 import { isServerPath, peopleOf } from './library'
 import { SHORTCUTS_DIALOG } from './shortcuts'
 import RightPanel from './components/RightPanel'
+import ImageEditor from './components/ImageEditor'
+import SettingsDialog from './components/SettingsDialog'
 import Sidebar from './components/Sidebar'
 import Viewer from './components/Viewer'
 import { useBatchOps } from './hooks/useBatchOps'
 import { useBrowser } from './hooks/useBrowser'
 import { useCollections } from './hooks/useCollections'
+import { useEditing } from './hooks/useEditing'
 import { useLibrary } from './hooks/useLibrary'
 import { useLibraryActions } from './hooks/useLibraryActions'
 import { useNotice } from './hooks/useNotice'
@@ -22,8 +25,8 @@ import { useServer } from './hooks/useServer'
 function App() {
   const dialogs = useDialogs()
   const [notice, setNotice] = useNotice()
-  const { library, setLibrary, ready } = useLibrary()
-  const pc = usePcFolders()
+  const { library, setLibrary, ready, startup } = useLibrary()
+  const pc = usePcFolders({ startup, settings: library.settings })
   const server = useServer({ library, setLibrary, libraryReady: ready, setNotice })
   const collections = useCollections(library)
   const browser = useBrowser(collections)
@@ -31,12 +34,15 @@ function App() {
 
   const [detailsOpen, setDetailsOpen] = useState(() => window.innerWidth >= 1280) // en ventanas estrechas empieza oculto
   const [dragging, setDragging] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const inputRef = useRef(null)
 
   const { current, selected, persistent } = browser
   const actions = useLibraryActions(setLibrary, current?.id)
+  const editor = useEditing({ library, current, browser, pc, server, setNotice })
+  const modalOpen = settingsOpen || editor.editing // con una ventana encima, el teclado es suyo
   usePeopleShortcuts({
-    enabled: persistent,
+    enabled: persistent && !modalOpen,
     file: current?.id,
     numbered: collections.numbered,
     setLibrary,
@@ -121,6 +127,7 @@ function App() {
         }}
         onOpenFiles={() => inputRef.current?.click()}
         onShowShortcuts={() => dialogs.alert(SHORTCUTS_DIALOG)}
+        onShowSettings={() => setSettingsOpen(true)}
       />
       <input
         ref={inputRef}
@@ -147,6 +154,9 @@ function App() {
             who={persistent ? peopleOf(library, current.id) : []}
             sending={ops.sending}
             detailsOpen={detailsOpen}
+            keysEnabled={!modalOpen}
+            version={editor.versions[current.id]}
+            onEdit={editor.start}
             onToggleDetails={() => setDetailsOpen((open) => !open)}
             onPrev={browser.prev}
             onNext={browser.next}
@@ -172,6 +182,35 @@ function App() {
           library={library}
           numbered={collections.numbered}
           actions={actions}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+      )}
+
+      {settingsOpen && (
+        <SettingsDialog
+          settings={library.settings}
+          serverFolder={library.serverFolder}
+          serverState={server.state}
+          onChange={actions.setSetting}
+          onServerFolder={actions.setServerFolder}
+          onPickServerFolder={actions.pickServerFolder}
+          onRescan={() => {
+            browser.reset()
+            pc.rescan()
+          }}
+          onReset={actions.resetSettings}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {editor.editing && current && (
+        <ImageEditor
+          key={current.id}
+          image={current}
+          settings={library.settings}
+          canReplace={editor.canReplace}
+          onClose={editor.close}
+          onSaved={editor.onSaved}
         />
       )}
     </div>

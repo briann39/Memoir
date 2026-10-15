@@ -34,6 +34,7 @@ function DialogsProvider({ children }) {
     const onKey = (e) => {
       if (e.key === 'Escape') {
         e.preventDefault()
+        e.stopPropagation()
         close(false)
       }
       if (e.key === 'Tab') {
@@ -49,9 +50,9 @@ function DialogsProvider({ children }) {
         }
       }
     }
-    window.addEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
     return () => {
-      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keydown', onKey, true)
       before?.focus?.()
     }
   }, [dialog, close])

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, Cloud, LoaderCircle, PanelRight, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Cloud, LoaderCircle, PanelRight, Pencil, Trash2 } from 'lucide-react'
 import { startImageDrag } from '../dnd'
+import { EDITABLE } from '../editor'
 import { tagColor } from '../library'
 
 const names = new Intl.ListFormat('es', { style: 'long', type: 'conjunction' })
@@ -56,6 +57,9 @@ function Viewer({
   sending,
   who,
   detailsOpen,
+  keysEnabled,
+  version,
+  onEdit,
   onToggleDetails,
   onPrev,
   onNext,
@@ -68,6 +72,7 @@ function Viewer({
   const [revealed, setRevealed] = useState(null) // foto en la nube que el usuario decidió descargar
 
   useEffect(() => {
+    if (!keysEnabled) return // hay una ventana encima (editor, configuración): el teclado es suyo
     const onKey = (e) => {
       if (e.target instanceof HTMLInputElement) return
       if (e.key === 'ArrowLeft') onPrev()
@@ -76,7 +81,7 @@ function Viewer({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onPrev, onNext, onToggleDelete, canMarkDelete])
+  }, [keysEnabled, onPrev, onNext, onToggleDelete, canMarkDelete])
 
   // Antes de cargar la foto se mira si está solo en la nube: abrirla la descargaría
   useEffect(() => {
@@ -107,6 +112,10 @@ function Viewer({
   }, [api, image.id, cloudOnly])
 
   const previewUrl = preview?.id === image.id ? preview.url : null
+  // Se puede editar si es un archivo del disco, de un formato editable, y ya está en el equipo
+  const editable = persistent && EDITABLE.test(image.name) && checked && !missing && !cloudOnly
+  // Si la foto se reemplazó, el número de versión obliga a mostrar la nueva y no la guardada en caché
+  const src = version ? `${image.url}&v=${version}` : image.url
   const frame = markedDelete ? 'ring-2 ring-peligro' : ''
   const dim = markedDelete ? 'opacity-60' : ''
 
@@ -119,6 +128,24 @@ function Viewer({
         <p className="shrink-0 text-suave" aria-label={`Foto ${index + 1} de ${total}`}>
           {index + 1} de {total}
         </p>
+        {persistent && (
+          <button
+            type="button"
+            disabled={!editable || sending}
+            title={
+              editable
+                ? 'Editar la foto'
+                : EDITABLE.test(image.name)
+                  ? 'Descarga la foto para poder editarla'
+                  : 'Solo se editan fotos JPG, PNG y WebP'
+            }
+            onClick={onEdit}
+            className="flex shrink-0 items-center gap-2 rounded-md border border-linea px-3 py-1.5 transition hover:border-acento disabled:opacity-50"
+          >
+            <Pencil size={16} aria-hidden />
+            Editar
+          </button>
+        )}
         {canMarkDelete && (
           <button
             type="button"
@@ -202,7 +229,7 @@ function Viewer({
               <div className={`${PRINT} ${frame}`}>
                 <img
                   key={image.id}
-                  src={image.url}
+                  src={src}
                   alt={who.length ? `${image.name}: ${names.format(who.map((w) => w.name))}` : image.name}
                   draggable={persistent}
                   onDragStart={(e) => startImageDrag(e, image.id)}

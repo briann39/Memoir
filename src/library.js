@@ -1,6 +1,17 @@
 // Biblioteca del usuario: álbumes propios y etiquetas. Las fotos se identifican por su ruta en disco.
 
+// Lo que el usuario puede cambiar en Configuración
+export const DEFAULT_SETTINGS = {
+  theme: 'system', // 'system' | 'light' | 'dark'
+  minKb: 10, // no mostrar fotos más pequeñas (iconos, miniaturas)
+  scanOnStart: true, // buscar fotos en el equipo al abrir la app
+  scanRoots: [], // carpetas donde buscar; vacío = la carpeta del usuario
+  jpegQuality: 92, // calidad al guardar fotos editadas (50 a 100)
+  saveMode: 'copy', // 'copy': guardar una copia · 'replace': reemplazar la original
+}
+
 export const EMPTY_LIBRARY = {
+  settings: DEFAULT_SETTINGS,
   albums: [],
   tags: [],
   imageTags: {},
@@ -9,6 +20,10 @@ export const EMPTY_LIBRARY = {
   importedFolders: [],
   toDelete: [], // fotos marcadas para eliminar; se borran juntas cuando el usuario lo confirma
 }
+
+export const setSetting = (lib, key, value) => ({ ...lib, settings: { ...lib.settings, [key]: value } })
+
+export const resetSettings = (lib) => ({ ...lib, settings: DEFAULT_SETTINGS })
 
 // Álbum al que va una foto que se envía sin estar en ningún álbum de la app
 export const NO_ALBUM = 'Sin álbum'
@@ -21,6 +36,7 @@ export const TAG_COLORS = ['Azul', 'Verde', 'Ámbar', 'Rosa', 'Violeta', 'Turque
 export const tagColor = (tag) => `var(--tag-${(tag.color ?? 0) % TAG_COLORS.length + 1})`
 
 const normalize = (lib) => ({
+  settings: { ...DEFAULT_SETTINGS, ...lib?.settings },
   albums: lib?.albums ?? [],
   tags: lib?.tags ?? [],
   imageTags: lib?.imageTags ?? {},

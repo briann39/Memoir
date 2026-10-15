@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveLibrary: (library) => ipcRenderer.invoke('library-save', library),
   loadCatalog: (serverDir) => ipcRenderer.invoke('catalog-load', serverDir),
   saveCatalog: (serverDir, catalog) => ipcRenderer.invoke('catalog-save', serverDir, catalog),
+  applySettings: (settings) => ipcRenderer.invoke('settings-apply', settings),
+  openDataFolder: () => ipcRenderer.invoke('open-data-folder'),
+  readImage: (file) => ipcRenderer.invoke('read-image', file),
+  saveImage: (file, mode, bytes) => ipcRenderer.invoke('save-image', file, mode, bytes),
   fileInfo: (file) => ipcRenderer.invoke('file-info', file),
   thumbnail: (file, size) => ipcRenderer.invoke('thumbnail', file, size),
   sendToServer: (file, serverDir, album, move) =>

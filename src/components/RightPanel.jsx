@@ -224,7 +224,7 @@ function TagSection({ kind, title, hint, empty, label, placeholder, tags, number
 }
 
 // actions: lo que se puede hacer con la biblioteca (ver useLibraryActions)
-function RightPanel({ image, canEdit, library, numbered, actions }) {
+function RightPanel({ image, canEdit, library, numbered, actions, onOpenSettings }) {
   const {
     toggleTag: onToggleTag,
     setColor: onSetColor,
@@ -234,8 +234,6 @@ function RightPanel({ image, canEdit, library, numbered, actions }) {
     addAlbum: onAddAlbum,
     removeAlbum: onRemoveAlbum,
     dropInAlbum: onDropImage,
-    setServerFolder: onServerFolder,
-    pickServerFolder: onPickServerFolder,
   } = actions
   const albumCheck = (name) => albumProblem(library, name)
   const { confirm } = useDialogs()
@@ -345,22 +343,14 @@ function RightPanel({ image, canEdit, library, numbered, actions }) {
       </Section>
 
       {window.electronAPI && (
-        <Section title="Servidor" hint="Carpeta de red o unidad donde se guardan tus álbumes y los datos de las fotos.">
-          <input
-            key={library.serverFolder}
-            aria-label="Carpeta del servidor"
-            defaultValue={library.serverFolder}
-            onBlur={(e) => onServerFolder(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-            placeholder="\\servidor\fotos"
-            className="w-full rounded-md border border-linea bg-elevado px-3 py-1.5 placeholder:text-suave"
-          />
+        <Section title="Servidor">
+          <p className="break-all text-suave">{library.serverFolder || 'Todavía no has elegido la carpeta del servidor.'}</p>
           <button
             type="button"
-            onClick={onPickServerFolder}
+            onClick={onOpenSettings}
             className="w-full rounded-md border border-linea bg-elevado px-3 py-1.5 transition hover:border-acento"
           >
-            Elegir carpeta
+            Cambiar en Configuración
           </button>
         </Section>
       )}
