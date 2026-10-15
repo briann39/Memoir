@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, nativeImage, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, net, protocol, shell } from 'electron'
 import { constants as fsConstants, realpath as realpathCallback } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -155,9 +155,12 @@ async function scan(sender, roots, channel) {
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    backgroundColor: '#0f172a',
+    width: 1360,
+    height: 860,
+    minWidth: 1100,
+    minHeight: 600,
+    title: 'Memoir',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#262a31' : '#e4e8ed', // el color de la mesa, sin parpadeo
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

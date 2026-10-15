@@ -1,7 +1,31 @@
 import { useEffect, useState } from 'react'
+import { ChevronLeft, ChevronRight, Cloud, LoaderCircle, PanelRight, Trash2 } from 'lucide-react'
 import { startImageDrag } from '../dnd'
 
-// persistent: la foto es un archivo del disco (no una imagen suelta)
+const names = new Intl.ListFormat('es', { style: 'long', type: 'conjunction' })
+
+// La copia: la foto sobre un paspartú, como en un álbum
+const PRINT =
+  'bg-marco p-3 shadow-[0_1px_2px_rgb(0_0_0/0.12),0_12px_32px_rgb(0_0_0/0.14)] rounded-[3px]'
+
+function NavButton({ side, label, onClick }) {
+  const Icon = side === 'left' ? ChevronLeft : ChevronRight
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={`absolute top-1/2 z-10 -translate-y-1/2 rounded-full border border-linea bg-elevado p-2 text-tinta shadow transition hover:border-acento ${
+        side === 'left' ? 'left-4' : 'right-4'
+      }`}
+    >
+      <Icon size={22} aria-hidden />
+    </button>
+  )
+}
+
+// persistent: la foto es un archivo del disco (no una foto suelta)
 function Viewer({
   image,
   index,
@@ -11,6 +35,8 @@ function Viewer({
   markedDelete,
   sending,
   who,
+  detailsOpen,
+  onToggleDetails,
   onPrev,
   onNext,
   onToggleDelete,
@@ -32,7 +58,7 @@ function Viewer({
     return () => window.removeEventListener('keydown', onKey)
   }, [onPrev, onNext, onToggleDelete, canMarkDelete])
 
-  // Antes de cargar la imagen se mira si está solo en la nube: abrirla la descargaría
+  // Antes de cargar la foto se mira si está solo en la nube: abrirla la descargaría
   useEffect(() => {
     if (!needsCheck) return
     let stale = false
@@ -61,109 +87,125 @@ function Viewer({
   }, [api, image.id, cloudOnly])
 
   const previewUrl = preview?.id === image.id ? preview.url : null
+  const frame = markedDelete ? 'ring-2 ring-peligro' : ''
+  const dim = markedDelete ? 'opacity-60' : ''
 
   return (
-    <div className="relative flex h-full flex-col">
-      <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-6 py-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <p className="min-w-0 truncate text-sm font-medium">{image.name}</p>
-          {who.map((w) => (
-            <span
-              key={w.id}
-              className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-300"
-            >
-              {w.kind === 'persona' ? '👤' : '🐾'} {w.name}
-            </span>
-          ))}
-        </div>
-        <div className="flex shrink-0 items-center gap-4">
-          <p className="text-sm text-slate-400">
-            {index + 1} / {total}
-          </p>
-          {canMarkDelete && (
-            <button
-              type="button"
-              title="Marcar para eliminar (Supr). No se borra hasta que pulses «Eliminar todas»."
-              aria-pressed={markedDelete}
-              disabled={sending}
-              onClick={onToggleDelete}
-              className={`rounded-lg px-3 py-1 text-sm transition disabled:opacity-50 ${
-                markedDelete
-                  ? 'bg-red-500 text-white hover:bg-red-400'
-                  : 'bg-red-500/15 text-red-300 hover:bg-red-500 hover:text-white'
-              }`}
-            >
-              {markedDelete ? '🗑 Marcada · quitar marca' : '🗑 Marcar para eliminar'}
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="flex h-full flex-col">
+      <header className="flex items-center gap-3 border-b border-linea bg-panel px-4 py-2">
+        <p className="min-w-0 flex-1 truncate font-bold" title={image.name}>
+          {image.name}
+        </p>
+        <p className="shrink-0 text-suave" aria-label={`Foto ${index + 1} de ${total}`}>
+          {index + 1} de {total}
+        </p>
+        {canMarkDelete && (
+          <button
+            type="button"
+            title="Marcar para eliminar (Supr). No se borra hasta que lo confirmes."
+            aria-pressed={markedDelete}
+            disabled={sending}
+            onClick={onToggleDelete}
+            className={`flex shrink-0 items-center gap-2 rounded-md border px-3 py-1.5 transition disabled:opacity-50 ${
+              markedDelete
+                ? 'border-peligro bg-peligro font-bold text-sobre-acento'
+                : 'border-linea hover:border-peligro hover:text-peligro'
+            }`}
+          >
+            <Trash2 size={16} aria-hidden />
+            {markedDelete ? 'Quitar marca' : 'Marcar para eliminar'}
+          </button>
+        )}
+        <button
+          type="button"
+          title={detailsOpen ? 'Ocultar detalles' : 'Mostrar detalles'}
+          aria-label={detailsOpen ? 'Ocultar detalles' : 'Mostrar detalles'}
+          aria-pressed={detailsOpen}
+          onClick={onToggleDetails}
+          className={`shrink-0 rounded-md border p-1.5 transition ${
+            detailsOpen ? 'border-acento bg-acento-suave text-acento' : 'border-linea hover:border-acento'
+          }`}
+        >
+          <PanelRight size={18} aria-hidden />
+        </button>
+      </header>
 
       {markedDelete && (
-        <p className="bg-red-500/15 px-6 py-1.5 text-center text-xs text-red-300">
-          Marcada para eliminar. Se borrará cuando pulses «Eliminar todas» en la barra lateral.
+        <p role="status" className="flex items-center justify-center gap-2 bg-peligro-suave px-4 py-1.5 text-peligro">
+          <Trash2 size={15} aria-hidden />
+          Marcada para eliminar. Se borrará cuando pulses «Eliminar» en la barra lateral.
         </p>
       )}
 
-      <div className="relative flex min-h-0 flex-1 items-center justify-center p-6">
-        {!checked ? null : missing ? (
-          <p className="text-slate-400">Este archivo ya no existe en el disco.</p>
-        ) : cloudOnly ? (
-          <div className="flex h-full w-full flex-col items-center gap-4">
-            {previewUrl ? (
-              <img
-                src={previewUrl}
-                alt={image.name}
-                className="min-h-0 max-w-full flex-1 rounded-lg object-contain"
-              />
-            ) : (
-              <span className="m-auto text-6xl" aria-hidden>
-                ☁️
-              </span>
-            )}
-            <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 text-sm">
-              <span className="text-slate-400">
-                ☁️ {previewUrl ? 'Vista previa' : 'Solo en la nube'} · la foto completa no está en tu PC
-              </span>
-              <button
-                type="button"
-                onClick={() => setRevealed(image.id)}
-                className="rounded-lg bg-sky-500 px-3 py-1.5 font-medium text-white transition hover:bg-sky-400"
-              >
-                Descargar y ver completa
-              </button>
+      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-6">
+        <figure className="flex max-w-full flex-col items-center gap-4">
+          {!checked ? (
+            <div className={`${PRINT} grid h-64 w-80 place-items-center text-suave`}>
+              <LoaderCircle size={28} aria-label="Cargando la foto" className="animate-spin" />
             </div>
-          </div>
-        ) : (
-          <img
-            key={image.id}
-            src={image.url}
-            alt={image.name}
-            draggable={persistent}
-            onDragStart={(e) => startImageDrag(e, image.id)}
-            className={`max-h-full max-w-full rounded-lg object-contain ${
-              markedDelete ? 'opacity-50 ring-2 ring-red-500' : ''
-            }`}
-          />
-        )}
+          ) : missing ? (
+            <div className={`${PRINT} grid w-96 max-w-full place-items-center gap-1 px-8 py-16 text-center`}>
+              <p className="font-serif text-xl">Esta foto ya no está en el disco</p>
+              <p className="text-suave">Puede que la hayas movido o borrado desde otro programa.</p>
+            </div>
+          ) : cloudOnly ? (
+            <>
+              <div className={`${PRINT} ${frame}`}>
+                {previewUrl ? (
+                  <img
+                    src={previewUrl}
+                    alt={`Vista previa de ${image.name}`}
+                    className={`block max-h-[calc(100vh-17rem)] max-w-full object-contain ${dim}`}
+                  />
+                ) : (
+                  <div className="grid h-64 w-80 place-items-center text-suave">
+                    <Cloud size={56} aria-hidden strokeWidth={1.25} />
+                  </div>
+                )}
+              </div>
+              <figcaption className="flex flex-wrap items-center justify-center gap-3 text-center">
+                <span className="flex items-center gap-2 text-suave">
+                  <Cloud size={16} aria-hidden />
+                  {previewUrl ? 'Vista previa.' : 'Sin vista previa.'} La foto completa solo está en la nube.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRevealed(image.id)}
+                  className="rounded-md bg-acento px-3 py-1.5 font-bold text-sobre-acento transition hover:opacity-90"
+                >
+                  Descargar y ver completa
+                </button>
+              </figcaption>
+            </>
+          ) : (
+            <>
+              <div className={`${PRINT} ${frame}`}>
+                <img
+                  key={image.id}
+                  src={image.url}
+                  alt={who.length ? `${image.name}: ${names.format(who.map((w) => w.name))}` : image.name}
+                  draggable={persistent}
+                  onDragStart={(e) => startImageDrag(e, image.id)}
+                  className={`block max-h-[calc(100vh-17rem)] max-w-full object-contain ${dim}`}
+                />
+              </div>
+              <figcaption className="text-center">
+                {who.length > 0 ? (
+                  <p className="font-serif text-2xl leading-tight">{names.format(who.map((w) => w.name))}</p>
+                ) : (
+                  <p className="font-serif text-xl italic text-suave">
+                    {persistent ? 'Nadie indicado todavía' : image.name}
+                  </p>
+                )}
+              </figcaption>
+            </>
+          )}
+        </figure>
+
         {total > 1 && (
           <>
-            <button
-              type="button"
-              aria-label="Anterior"
-              onClick={onPrev}
-              className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-4 py-2 text-2xl transition hover:bg-white/20"
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              aria-label="Siguiente"
-              onClick={onNext}
-              className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/10 px-4 py-2 text-2xl transition hover:bg-white/20"
-            >
-              ›
-            </button>
+            <NavButton side="left" label="Foto anterior (flecha izquierda)" onClick={onPrev} />
+            <NavButton side="right" label="Foto siguiente (flecha derecha)" onClick={onNext} />
           </>
         )}
       </div>

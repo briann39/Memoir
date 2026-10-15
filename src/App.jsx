@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CircleCheck, Images } from 'lucide-react'
+import { useDialogs } from './dialogs-context'
 import { cleanError } from './errors'
 import RightPanel from './components/RightPanel'
 import Sidebar from './components/Sidebar'
@@ -33,10 +35,14 @@ import {
 const api = window.electronAPI
 const LOOSE = '__loose__'
 const FILTER = '__filter__'
+// Entradas de la barra lateral que no son carpetas del disco: su contenido sale de la biblioteca
+const VIRTUAL = new Set(['album', 'persona', 'mascota', 'tag', 'filter', 'loose'])
 
 const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })
+const plural = (count, one, many) => `${count.toLocaleString('es')} ${count === 1 ? one : many}`
 
 function App() {
+  const dialogs = useDialogs()
   const [folders, setFolders] = useState([])
   const [scanning, setScanning] = useState(Boolean(api)) // la app de escritorio escanea al iniciar
   const [expanded, setExpanded] = useState(() => new Set())
@@ -44,9 +50,10 @@ function App() {
   const [loose, setLoose] = useState([])
   const [selected, setSelected] = useState(null) // { key, index }
   const [dragging, setDragging] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [progress, setProgress] = useState(null) // { done, total } mientras se envía
+  const [sending, setSending] = useState(false) // hay un envío o un borrado en curso
+  const [progress, setProgress] = useState(null) // { label, done, total } mientras dura
   const [notice, setNotice] = useState(null)
+  const [detailsOpen, setDetailsOpen] = useState(() => window.innerWidth >= 1280) // en ventanas estrechas empieza oculto
   const [library, setLibrary] = useState(EMPTY_LIBRARY)
   const [libraryReady, setLibraryReady] = useState(false)
   const [serverFolders, setServerFolders] = useState([]) // álbumes (carpetas) del servidor
@@ -55,6 +62,7 @@ function App() {
   const [filterIds, setFilterIds] = useState([]) // personas o mascotas elegidas para filtrar
   const [filterMode, setFilterMode] = useState('all') // 'all': salen todas · 'any': sale alguna
   const catalogRoot = useRef(null) // servidor cuyo catálogo se cargó bien; solo entonces se guarda
+  const cancelRef = useRef(false) // el usuario pidió cancelar el envío o el borrado
   const inputRef = useRef(null)
   const serverRoot = library.serverFolder
 
@@ -138,7 +146,7 @@ function App() {
     const timer = setTimeout(() => {
       api
         .saveCatalog(serverRoot, buildCatalog(library))
-        .catch(() => setNotice('No se pudieron guardar los datos en el servidor'))
+        .catch(() => setNotice('No se pudieron guardar los datos en el servidor.'))
     }, 500)
     return () => clearTimeout(timer)
   }, [library, serverRoot])
@@ -168,8 +176,7 @@ function App() {
         path: `album:${a.id}`,
         name: a.name,
         count: a.images.length,
-        virtual: true,
-        icon: '📒',
+        kind: 'album',
         albumId: a.id,
       })),
     [library.albums],
@@ -180,8 +187,7 @@ function App() {
         path: `tag:${t.id}`,
         name: t.name,
         count: virtualFiles[`tag:${t.id}`].length,
-        virtual: true,
-        icon: { persona: '👤', mascota: '🐾', tag: '🏷️' }[kindOf(t)],
+        kind: kindOf(t),
       })),
     [library.tags, virtualFiles],
   )
@@ -201,8 +207,14 @@ function App() {
       .sort(byName)
   }, [library.imageTags, activeFilter, filterMode])
   const filterEntry = activeFilter.length
-    ? { path: FILTER, name: 'Resultado', count: filterResults.length, virtual: true, icon: '🔎' }
+    ? { path: FILTER, name: 'Resultado', count: filterResults.length, kind: 'filter' }
     : null
+
+  // Las primeras nueve personas y mascotas tienen atajo de teclado (1 a 9), en el orden del panel de detalles
+  const numbered = useMemo(() => {
+    const ordered = [...people.filter((t) => kindOf(t) === 'persona'), ...people.filter((t) => kindOf(t) === 'mascota')]
+    return new Map(ordered.slice(0, 9).map((t, i) => [t.id, i + 1]))
+  }, [people])
 
   const toggleFilter = (tagId) => {
     setFilterIds((prev) => (prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]))
@@ -252,7 +264,7 @@ function App() {
       else next.add(entry.path)
       return next
     })
-    if (abierta || entry.virtual || filesByKey[entry.path]) return
+    if (abierta || VIRTUAL.has(entry.kind) || filesByKey[entry.path]) return
     const images = await api.readFolder(entry.path)
     setFilesByKey((prev) => ({ ...prev, [entry.path]: images }))
   }
@@ -294,19 +306,52 @@ function App() {
 
   useEffect(() => {
     if (!notice) return
-    const timer = setTimeout(() => setNotice(null), 4000)
+    const timer = setTimeout(() => setNotice(null), 4500)
     return () => clearTimeout(timer)
   }, [notice])
 
   const dropInAlbum = (albumId, file) => setLibrary((l) => addToAlbum(l, albumId, file))
 
-  const onAddAlbum = (name) => {
-    if (!validFolderName(name)) {
-      window.alert('Los álbumes son carpetas del servidor: no uses / \\ : * ? " < > | ni empieces o termines con un punto.')
-      return
-    }
-    setLibrary((l) => addAlbum(l, name))
+  // Motivo por el que un nombre de álbum no sirve (los álbumes son carpetas del servidor)
+  const albumCheck = (name) => {
+    if (!validFolderName(name)) return 'No uses / \\ : * ? " < > | ni empieces o termines con un punto.'
+    if (library.albums.some((a) => a.name.toLowerCase() === name.toLowerCase())) return 'Ya existe un álbum con ese nombre.'
+    return null
   }
+
+  const canEdit = Boolean(current) && selected.key !== LOOSE
+
+  // Personas y mascotas indicadas en la foto que se está viendo
+  const who = canEdit
+    ? people
+        .filter((t) => (library.imageTags[current.id] ?? []).includes(t.id))
+        .map((t) => ({ id: t.id, name: t.name, kind: kindOf(t) }))
+    : []
+
+  // Teclas 1 a 9: indican o quitan a la persona o mascota con ese número en la foto que se está viendo
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!/^[1-9]$/.test(e.key) || e.ctrlKey || e.metaKey || e.altKey || !canEdit) return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      const entry = [...numbered].find(([, num]) => num === Number(e.key))
+      if (entry) setLibrary((l) => toggleImageTag(l, current.id, entry[0]))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [canEdit, current, numbered])
+
+  const showShortcuts = () =>
+    dialogs.alert({
+      title: 'Atajos de teclado',
+      items: [
+        { label: 'Foto anterior o siguiente', value: '← →', kbd: true },
+        { label: 'Marcar o quitar la marca de eliminar', value: 'Supr', kbd: true },
+        { label: 'Indicar a una persona o mascota', value: '1 a 9', kbd: true },
+        { label: 'Cerrar un cuadro de diálogo', value: 'Esc', kbd: true },
+      ],
+      note: 'Los números siguen el orden de «Personas» y luego «Mascotas» en el panel de detalles.',
+      confirmLabel: 'Cerrar',
+    })
 
   // Eliminar es en dos pasos: primero se marcan las fotos (no se borra nada) y después se borran juntas
   const toDelete = useMemo(() => new Set(library.toDelete), [library.toDelete])
@@ -321,14 +366,21 @@ function App() {
   const deleteMarked = async () => {
     if (sending || !library.toDelete.length) return
     const files = [...library.toDelete]
-    const aviso = `¿Eliminar ${files.length === 1 ? 'la foto marcada' : `las ${files.length} fotos marcadas`}?\n\nIrán a la Papelera de reciclaje. Si están en una carpeta de iCloud, también se eliminarán de iCloud.`
-    if (!window.confirm(aviso)) return
+    const ok = await dialogs.confirm({
+      title: files.length === 1 ? '¿Eliminar la foto marcada?' : `¿Eliminar las ${files.length.toLocaleString('es')} fotos marcadas?`,
+      body: 'Irán a la Papelera de reciclaje. Si están en una carpeta de iCloud, también se eliminarán de iCloud.',
+      confirmLabel: 'Eliminar',
+      tone: 'danger',
+    })
+    if (!ok) return
 
+    cancelRef.current = false
     setSending(true)
     setProgress({ label: 'Eliminando', done: 0, total: files.length })
     const done = []
     let failure = null
     for (const file of files) {
+      if (cancelRef.current) break
       try {
         if ((await api.fileInfo(file)).exists) await api.trashFile(file)
         done.push(file) // si ya no existía, solo se quita de las listas
@@ -343,11 +395,14 @@ function App() {
     setProgress(null)
 
     if (failure) {
-      window.alert(
-        `Se eliminaron ${done.length} de ${files.length} fotos.\n\n${failure}\n\nLas demás siguen marcadas: puedes volver a intentarlo.`,
-      )
+      dialogs.alert({
+        title: 'No se pudo terminar',
+        body: `Se eliminaron ${done.length.toLocaleString('es')} de ${files.length.toLocaleString('es')} fotos.\n\n${failure}\n\nLas demás siguen marcadas: puedes volver a intentarlo.`,
+      })
+    } else if (cancelRef.current) {
+      setNotice(`Cancelado. Se eliminaron ${plural(done.length, 'foto', 'fotos')}.`)
     } else {
-      setNotice(`${done.length} ${done.length === 1 ? 'foto eliminada' : 'fotos eliminadas'}`)
+      setNotice(`${plural(done.length, 'foto eliminada', 'fotos eliminadas')}.`)
     }
   }
 
@@ -358,25 +413,38 @@ function App() {
   const sendAll = async () => {
     if (sending || !plan.length) return
     if (!serverRoot) {
-      window.alert('Primero elige la carpeta del servidor en el panel derecho.')
+      dialogs.alert({
+        title: 'Falta la carpeta del servidor',
+        body: 'Elígela en el panel de detalles, en la sección «Servidor».',
+      })
       return
     }
     if (catalogRoot.current !== serverRoot) {
-      window.alert('No hay conexión con el servidor. Comprueba que esté encendido y vuelve a intentarlo.')
+      dialogs.alert({
+        title: 'No hay conexión con el servidor',
+        body: 'Comprueba que esté encendido y vuelve a intentarlo.',
+      })
       return
     }
     const porAlbum = new Map()
     for (const { album } of plan) porAlbum.set(album, (porAlbum.get(album) ?? 0) + 1)
-    const resumen = [...porAlbum].map(([album, n]) => `• ${album}: ${n}`).join('\n')
-    const aviso = `Se enviarán ${plan.length} fotos al servidor, a estos álbumes:\n\n${resumen}\n\nSus datos (personas, mascotas y etiquetas) viajan con ellas. Las originales irán a la Papelera; si están en una carpeta de iCloud, también se eliminarán de iCloud.`
-    if (!window.confirm(aviso)) return
+    const ok = await dialogs.confirm({
+      title: `¿Enviar ${plural(plan.length, 'foto', 'fotos')} al servidor?`,
+      body: 'Cada foto va al álbum donde la pusiste. Sus datos (personas, mascotas y etiquetas) viajan con ella.',
+      items: [...porAlbum].map(([label, count]) => ({ label, value: count.toLocaleString('es') })),
+      note: 'Las originales irán a la Papelera. Si están en una carpeta de iCloud, también se eliminarán de iCloud.',
+      confirmLabel: 'Enviar',
+    })
+    if (!ok) return
 
+    cancelRef.current = false
     setSending(true)
     setProgress({ label: 'Enviando', done: 0, total: plan.length })
     const sent = []
     const missing = []
     let failure = null
     for (const { file, album } of plan) {
+      if (cancelRef.current) break
       try {
         sent.push({ from: file, to: await api.sendToServer(file, serverRoot, album, true) })
       } catch (err) {
@@ -402,14 +470,22 @@ function App() {
     setSending(false)
     setProgress(null)
 
-    const extra = missing.length ? ` (${missing.length} ya no existían)` : ''
+    const extra = missing.length ? ` ${plural(missing.length, 'ya no existía', 'ya no existían')}.` : ''
     if (failure) {
-      window.alert(
-        `Se enviaron ${sent.length} de ${plan.length} fotos.${extra}\n\n${failure}\n\nLas que faltan siguen en su álbum de la app: puedes volver a pulsar Enviar.`,
-      )
+      dialogs.alert({
+        title: 'No se pudo terminar',
+        body: `Se enviaron ${sent.length.toLocaleString('es')} de ${plan.length.toLocaleString('es')} fotos.${extra}\n\n${failure}\n\nLas que faltan siguen en su álbum de la app: puedes volver a enviar.`,
+      })
+    } else if (cancelRef.current) {
+      setNotice(`Cancelado. Se enviaron ${plural(sent.length, 'foto', 'fotos')}.${extra}`)
     } else {
-      setNotice(`${sent.length} ${sent.length === 1 ? 'foto enviada' : 'fotos enviadas'} al servidor${extra}`)
+      setNotice(`${plural(sent.length, 'foto enviada', 'fotos enviadas')} al servidor.${extra}`)
     }
+  }
+
+  const cancel = () => {
+    cancelRef.current = true
+    setProgress((p) => p && { ...p, label: 'Cancelando después de la foto actual:' })
   }
 
   // Quita fotos que ya no están en el disco de todas las listas
@@ -444,18 +520,9 @@ function App() {
     })
   }
 
-  const canEdit = Boolean(current) && selected.key !== LOOSE
-
-  // Personas y mascotas indicadas en la foto que se está viendo
-  const who = canEdit
-    ? people
-        .filter((t) => (library.imageTags[current.id] ?? []).includes(t.id))
-        .map((t) => ({ id: t.id, name: t.name, kind: kindOf(t) }))
-    : []
-
   return (
     <div
-      className="flex h-screen bg-slate-900 text-slate-100"
+      className="flex h-screen bg-mesa text-tinta"
       onDragOver={(e) => {
         e.preventDefault()
         if (e.dataTransfer.types.includes('Files')) setDragging(true)
@@ -497,6 +564,8 @@ function App() {
         onSendAll={sendAll}
         onDeleteMarked={deleteMarked}
         onClearDeleteMarks={() => setLibrary(clearDeleteMarks)}
+        onCancel={cancel}
+        onShowShortcuts={showShortcuts}
         onPick={(key, index) => setSelected({ key, index })}
         onStop={stop}
         onRescan={rescan}
@@ -527,49 +596,62 @@ function App() {
             onToggleDelete={toggleDeleteMark}
             who={who}
             sending={sending}
+            detailsOpen={detailsOpen}
+            onToggleDetails={() => setDetailsOpen((open) => !open)}
             onPrev={prev}
             onNext={next}
           />
         ) : (
-          <div className="flex h-full p-6">
+          <div className="grid h-full place-items-center p-8">
             <div
-              className={`flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed transition ${
-                dragging ? 'border-sky-400 bg-sky-400/10' : 'border-slate-700'
+              className={`max-w-md rounded-lg border border-dashed p-10 text-center transition ${
+                dragging ? 'border-acento bg-acento-suave' : 'border-linea'
               }`}
             >
-              <p className="text-lg font-medium">
-                {api ? 'Abre una carpeta y elige una foto' : 'Arrastra imágenes aquí'}
-              </p>
-              <p className="text-sm text-slate-400">
-                {api ? 'o arrastra imágenes a esta ventana' : 'o usa el botón "Abrir imágenes"'}
+              <Images size={40} aria-hidden strokeWidth={1.25} className="mx-auto text-suave" />
+              <h2 className="mt-4 font-serif text-3xl leading-tight">
+                {api ? 'Elige una foto para empezar' : 'Suelta tus fotos aquí'}
+              </h2>
+              <p className="mt-2 text-suave">
+                {api
+                  ? 'Abre una carpeta o un álbum en la barra lateral, o arrastra fotos a esta ventana.'
+                  : 'También puedes usar «Abrir fotos».'}
               </p>
             </div>
           </div>
         )}
         {notice && (
-          <p className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white shadow-lg">
+          <p
+            role="status"
+            className="absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-md border border-linea bg-elevado px-4 py-2 shadow-lg"
+          >
+            <CircleCheck size={18} aria-hidden className="text-exito" />
             {notice}
           </p>
         )}
       </main>
 
-      <RightPanel
-        image={current}
-        canEdit={canEdit}
-        library={library}
-        onServerFolder={(folder) => setLibrary((l) => ({ ...l, serverFolder: folder.trim().replace(/\//g, '\\') }))}
-        onPickServerFolder={async () => {
-          const [folder] = await api.selectFolders()
-          if (folder) setLibrary((l) => ({ ...l, serverFolder: folder.replace(/\//g, '\\') }))
-        }}
-        onToggleTag={(tagId) => setLibrary((l) => toggleImageTag(l, current.id, tagId))}
-        onAddTag={(name, kind) => setLibrary((l) => addTag(l, name, kind))}
-        onRemoveTag={(tagId) => setLibrary((l) => removeTag(l, tagId))}
-        onToggleAlbum={(albumId) => setLibrary((l) => toggleInAlbum(l, albumId, current.id))}
-        onDropImage={dropInAlbum}
-        onAddAlbum={onAddAlbum}
-        onRemoveAlbum={(albumId) => setLibrary((l) => removeAlbum(l, albumId))}
-      />
+      {detailsOpen && (
+        <RightPanel
+          image={current}
+          canEdit={canEdit}
+          library={library}
+          numbered={numbered}
+          albumCheck={albumCheck}
+          onServerFolder={(folder) => setLibrary((l) => ({ ...l, serverFolder: folder.trim().replace(/\//g, '\\') }))}
+          onPickServerFolder={async () => {
+            const [folder] = await api.selectFolders()
+            if (folder) setLibrary((l) => ({ ...l, serverFolder: folder.replace(/\//g, '\\') }))
+          }}
+          onToggleTag={(tagId) => setLibrary((l) => toggleImageTag(l, current.id, tagId))}
+          onAddTag={(name, kind) => setLibrary((l) => addTag(l, name, kind))}
+          onRemoveTag={(tagId) => setLibrary((l) => removeTag(l, tagId))}
+          onToggleAlbum={(albumId) => setLibrary((l) => toggleInAlbum(l, albumId, current.id))}
+          onDropImage={dropInAlbum}
+          onAddAlbum={(name) => setLibrary((l) => addAlbum(l, name))}
+          onRemoveAlbum={(albumId) => setLibrary((l) => removeAlbum(l, albumId))}
+        />
+      )}
     </div>
   )
 }

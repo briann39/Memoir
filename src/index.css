@@ -1,1 +1,110 @@
 @import "tailwindcss";
+@import "@fontsource/atkinson-hyperlegible/400.css";
+@import "@fontsource/atkinson-hyperlegible/700.css";
+@import "@fontsource-variable/newsreader/standard.css";
+@import "@fontsource-variable/newsreader/standard-italic.css";
+
+/*
+  Memoir: una mesa de luz. Superficies planas en grises fríos, tinta azulada y un solo color de acento
+  (azul de cianotipo). El protagonista es la foto, presentada como una copia enmarcada con su pie.
+*/
+:root {
+  color-scheme: light;
+  --mesa: #e4e8ed; /* donde se ve la foto */
+  --panel: #f3f5f7; /* barras laterales */
+  --elevado: #ffffff; /* diálogos y campos */
+  --marco: #fcfcfb; /* paspartú de la copia */
+  --linea: #cdd4dc;
+  --tinta: #1b2430;
+  --tinta-suave: #556170;
+  --acento: #1d4e89;
+  --sobre-acento: #ffffff;
+  --acento-suave: #d8e5f4;
+  --mascota: #8c540c;
+  --mascota-suave: #f6e6cb;
+  --peligro: #b42318;
+  --peligro-suave: #fbe3e0;
+  --exito: #17653f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --mesa: #262a31;
+    --panel: #1b1e23;
+    --elevado: #2b3037;
+    --marco: #343a43;
+    --linea: #3a414b;
+    --tinta: #e6e9ee;
+    --tinta-suave: #9ba6b5;
+    --acento: #86b4ee;
+    --sobre-acento: #0e1b2d;
+    --acento-suave: #223650;
+    --mascota: #e3a64f;
+    --mascota-suave: #43331a;
+    --peligro: #f28b80;
+    --peligro-suave: #4a2623;
+    --exito: #6fd69c;
+  }
+}
+
+@theme inline {
+  --font-sans: "Atkinson Hyperlegible", system-ui, sans-serif;
+  --font-serif: "Newsreader Variable", Georgia, serif;
+  --color-mesa: var(--mesa);
+  --color-panel: var(--panel);
+  --color-elevado: var(--elevado);
+  --color-marco: var(--marco);
+  --color-linea: var(--linea);
+  --color-tinta: var(--tinta);
+  --color-suave: var(--tinta-suave);
+  --color-acento: var(--acento);
+  --color-sobre-acento: var(--sobre-acento);
+  --color-acento-suave: var(--acento-suave);
+  --color-mascota: var(--mascota);
+  --color-mascota-suave: var(--mascota-suave);
+  --color-peligro: var(--peligro);
+  --color-peligro-suave: var(--peligro-suave);
+  --color-exito: var(--exito);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--mesa);
+  color: var(--tinta);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+/* El foco siempre se ve, también con el teclado */
+:focus-visible {
+  outline: 2px solid var(--acento);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--acento-suave);
+}
+
+/* Barras de desplazamiento discretas */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--linea) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
