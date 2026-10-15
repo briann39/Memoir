@@ -6,10 +6,12 @@ import {
   addAlbum,
   addTag,
   EMPTY_LIBRARY,
+  hideFolder,
   imageFromPath,
   loadLibrary,
   removeAlbum,
   removeTag,
+  restoreFolder,
   saveLibrary,
   toggleImageTag,
   toggleInAlbum,
@@ -107,6 +109,17 @@ function App() {
     [filesByKey, loose, virtualFiles],
   )
 
+  // Las carpetas descartadas no se muestran, aunque el escaneo las vuelva a encontrar
+  const shownFolders = useMemo(
+    () => folders.filter((f) => !library.hiddenFolders.includes(f.path)),
+    [folders, library.hiddenFolders],
+  )
+
+  const discardFolder = (entry) => {
+    setLibrary((l) => hideFolder(l, entry.path))
+    setSelected((s) => (s?.key === entry.path ? null : s))
+  }
+
   const rescan = () => {
     setFolders([])
     setExpanded(new Set())
@@ -189,7 +202,8 @@ function App() {
       onDrop={onDrop}
     >
       <Sidebar
-        folders={folders}
+        folders={shownFolders}
+        hiddenFolders={library.hiddenFolders}
         looseCount={loose.length}
         albums={albumEntries}
         tags={tagEntries}
@@ -199,6 +213,8 @@ function App() {
         filesByKey={allFiles}
         selected={selected}
         onToggle={toggleFolder}
+        onHide={discardFolder}
+        onRestore={(folder) => setLibrary((l) => restoreFolder(l, folder))}
         onPick={(key, index) => setSelected({ key, index })}
         onStop={stop}
         onRescan={rescan}

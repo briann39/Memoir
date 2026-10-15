@@ -10,6 +10,7 @@ function SectionTitle({ children }) {
 
 function Sidebar({
   folders,
+  hiddenFolders,
   looseCount,
   albums,
   tags,
@@ -19,6 +20,8 @@ function Sidebar({
   filesByKey,
   selected,
   onToggle,
+  onHide,
+  onRestore,
   onPick,
   onStop,
   onRescan,
@@ -26,6 +29,7 @@ function Sidebar({
   onOpenFiles,
 }) {
   const [query, setQuery] = useState('')
+  const [showHidden, setShowHidden] = useState(false)
 
   const term = query.trim().toLowerCase()
   const visible = folders
@@ -39,20 +43,33 @@ function Sidebar({
     const files = filesByKey[f.path]
     return (
       <div key={f.path}>
-        <button
-          type="button"
-          title={f.virtual ? f.name : f.path}
-          aria-expanded={isOpen}
-          onClick={() => onToggle(f)}
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-slate-800"
-        >
-          <span aria-hidden className="w-3 text-xs text-slate-500">
-            {isOpen ? '▾' : '▸'}
-          </span>
-          <span aria-hidden>{f.icon ?? (isOpen ? '📂' : '📁')}</span>
-          <span className="min-w-0 flex-1 truncate">{f.name}</span>
-          <span className="shrink-0 text-xs text-slate-500">{f.count}</span>
-        </button>
+        <div className="group flex items-center rounded-lg transition hover:bg-slate-800">
+          <button
+            type="button"
+            title={f.virtual ? f.name : f.path}
+            aria-expanded={isOpen}
+            onClick={() => onToggle(f)}
+            className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-sm"
+          >
+            <span aria-hidden className="w-3 text-xs text-slate-500">
+              {isOpen ? '▾' : '▸'}
+            </span>
+            <span aria-hidden>{f.icon ?? (isOpen ? '📂' : '📁')}</span>
+            <span className="min-w-0 flex-1 truncate">{f.name}</span>
+            <span className="shrink-0 text-xs text-slate-500">{f.count}</span>
+          </button>
+          {!f.virtual && (
+            <button
+              type="button"
+              title="Descartar del visor"
+              aria-label={`Descartar ${f.name}`}
+              onClick={() => onHide(f)}
+              className="px-2 text-xs text-slate-500 opacity-0 transition hover:text-red-400 focus:opacity-100 group-hover:opacity-100"
+            >
+              ✕
+            </button>
+          )}
+        </div>
 
         {isOpen && (
           <ul className="mb-1 ml-5 border-l border-slate-800 pl-2">
@@ -159,6 +176,34 @@ function Sidebar({
               </p>
             )}
             {visible.map(renderEntry)}
+
+            {hiddenFolders.length > 0 && (
+              <div className="mt-3 border-t border-slate-800 pt-2">
+                <button
+                  type="button"
+                  aria-expanded={showHidden}
+                  onClick={() => setShowHidden((v) => !v)}
+                  className="w-full rounded px-3 py-1 text-left text-xs text-slate-400 transition hover:bg-slate-800"
+                >
+                  {showHidden ? '▾' : '▸'} Descartadas ({hiddenFolders.length})
+                </button>
+                {showHidden &&
+                  hiddenFolders.map((folder) => (
+                    <div key={folder} className="flex items-center gap-2 px-3 py-1 text-xs">
+                      <span title={folder} className="min-w-0 flex-1 truncate text-slate-500">
+                        {folder.split(/[\\/]/).pop() || folder}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onRestore(folder)}
+                        className="shrink-0 rounded px-2 py-0.5 text-sky-400 transition hover:bg-slate-800"
+                      >
+                        Restaurar
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
           </>
         )}
       </nav>

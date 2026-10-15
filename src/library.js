@@ -1,6 +1,6 @@
 // Biblioteca del usuario: álbumes propios y etiquetas. Las fotos se identifican por su ruta en disco.
 
-export const EMPTY_LIBRARY = { albums: [], tags: [], imageTags: {} }
+export const EMPTY_LIBRARY = { albums: [], tags: [], imageTags: {}, hiddenFolders: [] }
 
 // Colores de etiquetas (clases completas para que Tailwind las detecte)
 export const TAG_COLORS = [
@@ -16,6 +16,7 @@ const normalize = (lib) => ({
   albums: lib?.albums ?? [],
   tags: lib?.tags ?? [],
   imageTags: lib?.imageTags ?? {},
+  hiddenFolders: lib?.hiddenFolders ?? [],
 })
 
 // En Electron se guarda en un archivo de la app; en el navegador, en localStorage
@@ -69,6 +70,15 @@ export function toggleImageTag(lib, file, tagId) {
   if (ids.length) imageTags[file] = ids
   else delete imageTags[file]
   return { ...lib, imageTags }
+}
+
+// Carpetas descartadas del visor (no se borran del disco)
+export function hideFolder(lib, folder) {
+  return lib.hiddenFolders.includes(folder) ? lib : { ...lib, hiddenFolders: [...lib.hiddenFolders, folder] }
+}
+
+export function restoreFolder(lib, folder) {
+  return { ...lib, hiddenFolders: lib.hiddenFolders.filter((f) => f !== folder) }
 }
 
 export function addAlbum(lib, name) {
