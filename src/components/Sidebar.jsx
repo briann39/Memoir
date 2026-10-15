@@ -15,6 +15,16 @@ function Sidebar({
   looseCount,
   albums,
   tags,
+  people,
+  filterIds,
+  filterMode,
+  filterEntry,
+  onToggleFilter,
+  onFilterMode,
+  serverFolders,
+  serverState,
+  serverError,
+  onRetryServer,
   scanning,
   canScan,
   expanded,
@@ -43,6 +53,10 @@ function Sidebar({
     .filter((f) => f.name.toLowerCase().includes(term) || f.path.toLowerCase().includes(term))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
   const total = folders.reduce((sum, f) => sum + f.count, 0)
+  const serverVisible = serverFolders
+    .filter((f) => f.name.toLowerCase().includes(term))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+  const serverTotal = serverFolders.reduce((sum, f) => sum + f.count, 0)
 
   // Entrada desplegable: carpeta real o colección virtual (álbum, etiqueta, imágenes sueltas)
   const renderEntry = (f) => {
@@ -75,7 +89,7 @@ function Sidebar({
             <span className="min-w-0 flex-1 truncate">{f.name}</span>
             <span className="shrink-0 text-xs text-slate-500">{f.count}</span>
           </button>
-          {!f.virtual && (
+          {!f.virtual && !f.server && (
             <button
               type="button"
               title="Descartar del visor"
@@ -165,6 +179,51 @@ function Sidebar({
             icon: '🖼️',
           })}
 
+        {people.length > 0 && (
+          <>
+            <SectionTitle>Buscar por personas</SectionTitle>
+            <div className="flex flex-wrap gap-1.5 px-3 pb-2">
+              {people.map((p) => {
+                const on = filterIds.includes(p.id)
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => onToggleFilter(p.id)}
+                    className={`rounded-full px-2.5 py-1 text-xs transition ${
+                      on ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {p.kind === 'mascota' ? '🐾' : '👤'} {p.name}
+                  </button>
+                )
+              })}
+            </div>
+            {filterIds.length > 1 && (
+              <div className="flex gap-1 px-3 pb-2 text-xs" role="group" aria-label="Cómo combinar">
+                {[
+                  ['all', 'Salen todas'],
+                  ['any', 'Sale alguna'],
+                ].map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    aria-pressed={filterMode === mode}
+                    onClick={() => onFilterMode(mode)}
+                    className={`flex-1 rounded px-2 py-1 transition ${
+                      filterMode === mode ? 'bg-slate-700 text-slate-100' : 'text-slate-500 hover:bg-slate-800'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {filterEntry && renderEntry(filterEntry)}
+          </>
+        )}
+
         {albums.length > 0 && (
           <>
             <SectionTitle>Álbumes</SectionTitle>
@@ -179,10 +238,48 @@ function Sidebar({
           </>
         )}
 
+        {serverState !== 'none' && (
+          <>
+            <div className="flex items-center justify-between gap-2 pr-1">
+              <SectionTitle>Servidor</SectionTitle>
+              {serverState === 'offline' && (
+                <button
+                  type="button"
+                  onClick={onRetryServer}
+                  className="mt-2 shrink-0 rounded px-2 py-0.5 text-xs text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
+                >
+                  Reintentar
+                </button>
+              )}
+            </div>
+            {serverState === 'offline' ? (
+              <p className="px-3 pb-2 text-xs text-amber-400">
+                {serverError ?? 'Sin conexión con el servidor.'}
+              </p>
+            ) : (
+              <>
+                <p className="px-3 pb-1 text-xs text-slate-500">
+                  {serverState === 'ready'
+                    ? `${serverFolders.length} álbumes · ${serverTotal} fotos`
+                    : 'Conectando…'}
+                </p>
+                {serverState === 'ready' && serverVisible.length === 0 && (
+                  <p className="px-3 pb-2 text-xs text-slate-500">
+                    {serverFolders.length === 0
+                      ? 'Todavía no hay álbumes en el servidor.'
+                      : 'Ningún álbum coincide.'}
+                  </p>
+                )}
+                {serverVisible.map((f) => renderEntry({ ...f, server: true, icon: '🗄️' }))}
+              </>
+            )}
+          </>
+        )}
+
         {canScan && (
           <>
             <div className="flex items-center justify-between gap-2 pr-1">
-              <SectionTitle>Carpetas</SectionTitle>
+              <SectionTitle>Carpetas del equipo</SectionTitle>
               <button
                 type="button"
                 onClick={scanning ? onStop : onRescan}

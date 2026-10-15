@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { startImageDrag } from '../dnd'
 
 // persistent: la foto es un archivo del disco (no una imagen suelta)
-function Viewer({ image, index, total, persistent, sending, who, onPrev, onNext, onDelete }) {
+function Viewer({ image, index, total, persistent, canDelete, sending, who, onPrev, onNext, onDelete }) {
   const api = window.electronAPI
   const needsCheck = persistent && Boolean(api)
   const [info, setInfo] = useState(null) // { id, exists, cloud }
@@ -14,11 +14,11 @@ function Viewer({ image, index, total, persistent, sending, who, onPrev, onNext,
       if (e.target instanceof HTMLInputElement) return
       if (e.key === 'ArrowLeft') onPrev()
       if (e.key === 'ArrowRight') onNext()
-      if (e.key === 'Delete' && persistent) onDelete()
+      if (e.key === 'Delete' && canDelete) onDelete()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onPrev, onNext, onDelete, persistent])
+  }, [onPrev, onNext, onDelete, canDelete])
 
   // Antes de cargar la imagen se mira si está solo en la nube: abrirla la descargaría
   useEffect(() => {
@@ -68,7 +68,7 @@ function Viewer({ image, index, total, persistent, sending, who, onPrev, onNext,
           <p className="text-sm text-slate-400">
             {index + 1} / {total}
           </p>
-          {persistent && (
+          {canDelete && (
             <button
               type="button"
               title="Eliminar (Supr)"

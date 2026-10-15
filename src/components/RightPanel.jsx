@@ -115,7 +115,7 @@ function RightPanel({
       <TagSection
         {...shared}
         title="👤 Personas"
-        hint="Quién sale en la foto. Al enviar, se guarda en la carpeta Personas de esa persona."
+        hint="Quién sale en la foto. Es solo un dato para buscar, por ejemplo las fotos donde salen dos personas."
         empty="Crea a las personas, por ejemplo Mamá o Brian."
         placeholder="Nueva persona"
         tags={byKind('persona')}
@@ -125,7 +125,7 @@ function RightPanel({
       <TagSection
         {...shared}
         title="🐾 Mascotas"
-        hint="Al enviar, se guarda en la carpeta Mascotas de esa mascota. Si salen varias, se copia a cada una."
+        hint="Igual que las personas: un dato de la foto, no una carpeta."
         empty="Crea a tus mascotas, por ejemplo Luna."
         placeholder="Nueva mascota"
         tags={byKind('mascota')}
@@ -135,7 +135,7 @@ function RightPanel({
       <TagSection
         {...shared}
         title="Etiquetas"
-        hint="Para organizar: Juegos, Trabajo… No se envían a ningún lado."
+        hint="Para organizar: Juegos, Trabajo…"
         empty="Crea etiquetas como Juegos o Trabajo."
         placeholder="Nueva etiqueta"
         tags={byKind('tag')}
@@ -207,7 +207,9 @@ function RightPanel({
             Elegir carpeta…
           </button>
           <p className="text-xs text-slate-500">
-            Carpeta de red o unidad donde se guardan las fotos al pulsar "Enviar" en la barra lateral.
+            Carpeta de red o unidad donde se guardan tus álbumes. Los datos de las fotos (personas,
+            mascotas y etiquetas) se guardan ahí mismo, en una carpeta oculta llamada .memoir. Al
+            pulsar "Enviar", cada foto va a la carpeta con el nombre de su álbum de la app.
           </p>
         </section>
       )}

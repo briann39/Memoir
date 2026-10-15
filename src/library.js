@@ -1,6 +1,16 @@
 // Biblioteca del usuario: álbumes propios y etiquetas. Las fotos se identifican por su ruta en disco.
 
-export const EMPTY_LIBRARY = { albums: [], tags: [], imageTags: {}, hiddenFolders: [], serverFolder: '' }
+export const EMPTY_LIBRARY = {
+  albums: [],
+  tags: [],
+  imageTags: {},
+  hiddenFolders: [],
+  serverFolder: '',
+  importedFolders: [],
+}
+
+// Álbum al que va una foto que se envía sin estar en ningún álbum de la app
+export const NO_ALBUM = 'Sin álbum'
 
 // Colores de etiquetas (clases completas para que Tailwind las detecte)
 export const TAG_COLORS = [
@@ -18,7 +28,86 @@ const normalize = (lib) => ({
   imageTags: lib?.imageTags ?? {},
   hiddenFolders: lib?.hiddenFolders ?? [],
   serverFolder: lib?.serverFolder ?? '',
+  importedFolders: lib?.importedFolders ?? [],
 })
+
+// ---- Fotos del servidor ----
+// Los datos de las fotos del servidor (personas, mascotas, etiquetas) se guardan en el propio servidor,
+// con la ruta relativa de cada foto; en la app se ven como cualquier otra foto, por su ruta completa.
+
+const norm = (p) => p.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase()
+
+export function isServerPath(lib, file) {
+  return Boolean(lib.serverFolder) && norm(file).startsWith(norm(lib.serverFolder) + '\\')
+}
+
+const relOf = (lib, file) => file.slice(norm(lib.serverFolder).length + 1).replace(/\\/g, '/')
+const absOf = (lib, rel) => lib.serverFolder.replace(/[\\/]+$/, '') + '\\' + rel.replace(/\//g, '\\')
+
+// Lo que se guarda en el servidor: las etiquetas y los datos de las fotos que están allí
+export function buildCatalog(lib) {
+  const photos = {}
+  for (const [file, ids] of Object.entries(lib.imageTags)) {
+    if (isServerPath(lib, file)) photos[relOf(lib, file)] = ids
+  }
+  return { version: 1, tags: lib.tags, photos, importedFolders: lib.importedFolders }
+}
+
+// Une los datos del servidor con los de la app. Las etiquetas se reconocen por tipo y nombre,
+// porque cada instalación les pone un id distinto.
+export function mergeCatalog(lib, catalog) {
+  if (!catalog) return lib
+  const tags = [...lib.tags]
+  const ids = {}
+  for (const tag of catalog.tags ?? []) {
+    const mine = tags.find((t) => kindOf(t) === kindOf(tag) && t.name.toLowerCase() === tag.name.toLowerCase())
+    if (mine) ids[tag.id] = mine.id
+    else {
+      tags.push({ ...tag })
+      ids[tag.id] = tag.id
+    }
+  }
+  const imageTags = { ...lib.imageTags }
+  for (const [rel, tagIds] of Object.entries(catalog.photos ?? {})) {
+    const mapped = [...new Set(tagIds.map((id) => ids[id]).filter(Boolean))]
+    if (mapped.length) imageTags[absOf(lib, rel)] = mapped
+  }
+  const importedFolders = [...new Set([...lib.importedFolders, ...(catalog.importedFolders ?? [])])]
+  return { ...lib, tags, imageTags, importedFolders }
+}
+
+// Una carpeta del servidor de la versión anterior (Personas\Ana, Mascotas\Luna) se reconoce una sola vez:
+// sus fotos quedan con el dato de la persona o mascota, sin moverlas.
+export function importLegacyFolder(lib, folder) {
+  if (lib.importedFolders.includes(folder.rel)) return lib
+  const { kind, name } = folder.legacy
+  const withTag = addTag(lib, name, kind)
+  const tag = withTag.tags.find((t) => kindOf(t) === kind && t.name.toLowerCase() === name.toLowerCase())
+  const imageTags = { ...withTag.imageTags }
+  for (const file of folder.files) {
+    const ids = imageTags[file] ?? []
+    if (!ids.includes(tag.id)) imageTags[file] = [...ids, tag.id]
+  }
+  return { ...withTag, imageTags, importedFolders: [...withTag.importedFolders, folder.rel] }
+}
+
+// Pasa los datos de fotos que cambiaron de ruta (al enviarlas al servidor)
+export function moveMeta(lib, moves) {
+  const imageTags = { ...lib.imageTags }
+  for (const { from, to } of moves) {
+    if (imageTags[from]) {
+      imageTags[to] = imageTags[from]
+      delete imageTags[from]
+    }
+  }
+  return { ...lib, imageTags }
+}
+
+// Nombre válido para una carpeta de Windows (los álbumes son carpetas del servidor)
+export const validFolderName = (name) => {
+  const clean = name.trim()
+  return Boolean(clean) && clean.length <= 100 && !/[<>:"/\\|?*]/.test(clean) && !/[. ]$/.test(clean) && !clean.startsWith('.')
+}
 
 // En Electron se guarda en un archivo de la app; en el navegador, en localStorage
 export async function loadLibrary() {
@@ -31,9 +120,14 @@ export async function loadLibrary() {
 }
 
 export function saveLibrary(lib) {
+  // Los datos de las fotos del servidor viven en el servidor, no en este archivo
+  const local = {
+    ...lib,
+    imageTags: Object.fromEntries(Object.entries(lib.imageTags).filter(([file]) => !isServerPath(lib, file))),
+  }
   try {
-    if (window.electronAPI) window.electronAPI.saveLibrary(lib)
-    else localStorage.setItem('library', JSON.stringify(lib))
+    if (window.electronAPI) window.electronAPI.saveLibrary(local)
+    else localStorage.setItem('library', JSON.stringify(local))
   } catch {
     // sin almacenamiento disponible: los cambios solo duran la sesión
   }
@@ -60,18 +154,22 @@ export function addTag(lib, name, kind = 'tag') {
   return { ...lib, tags: [...lib.tags, tag] }
 }
 
-// Fotos que tienen una persona o mascota asignada y a qué carpetas del servidor irían
+// Fotos de este equipo listas para enviar: las que están en un álbum de la app o tienen una persona o
+// mascota. Cada una va a la carpeta del servidor con el nombre de su álbum (la primera, si está en varias).
 export function sendPlan(lib) {
-  const tags = new Map(lib.tags.map((t) => [t.id, t]))
-  const plan = []
-  for (const [file, ids] of Object.entries(lib.imageTags)) {
-    const targets = ids
-      .map((id) => tags.get(id))
-      .filter((t) => t && (kindOf(t) === 'persona' || kindOf(t) === 'mascota'))
-      .map((t) => ({ kind: kindOf(t) === 'persona' ? 'personas' : 'mascotas', name: t.name }))
-    if (targets.length) plan.push({ file, targets })
+  const people = new Set(lib.tags.filter((t) => kindOf(t) !== 'tag').map((t) => t.id))
+  const albumOf = new Map()
+  for (const album of lib.albums) {
+    for (const file of album.images) if (!albumOf.has(file)) albumOf.set(file, album.name)
   }
-  return plan.sort((a, b) => a.file.localeCompare(b.file))
+  const files = new Set(albumOf.keys())
+  for (const [file, ids] of Object.entries(lib.imageTags)) {
+    if (ids.some((id) => people.has(id))) files.add(file)
+  }
+  return [...files]
+    .filter((file) => !isServerPath(lib, file))
+    .map((file) => ({ file, album: albumOf.get(file) ?? NO_ALBUM }))
+    .sort((a, b) => a.file.localeCompare(b.file))
 }
 
 export function removeTag(lib, tagId) {
@@ -113,7 +211,9 @@ export function restoreFolder(lib, folder) {
 
 export function addAlbum(lib, name) {
   const clean = name.trim()
-  if (!clean || lib.albums.some((a) => a.name.toLowerCase() === clean.toLowerCase())) return lib
+  if (!validFolderName(clean) || lib.albums.some((a) => a.name.toLowerCase() === clean.toLowerCase())) {
+    return lib
+  }
   return { ...lib, albums: [...lib.albums, { id: crypto.randomUUID(), name: clean, images: [] }] }
 }
 

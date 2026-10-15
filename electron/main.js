@@ -19,7 +19,9 @@ const SKIP_DIRS = new Set([
 
 const isImage = (file) => IMAGE_EXT.has(path.extname(file).toLowerCase())
 const mediaUrl = (file) => `media://local/?p=${encodeURIComponent(file)}`
-const shouldSkip = (name) => name.startsWith('.') || SKIP_DIRS.has(name.toLowerCase())
+// En el servidor solo se saltan las carpetas ocultas (como .memoir); sus álbumes pueden llamarse como quieran
+const shouldSkip = (name, channel) =>
+  name.startsWith('.') || name.startsWith('$') || (channel !== 'server' && SKIP_DIRS.has(name.toLowerCase()))
 
 // Esquema propio para mostrar imágenes locales desde la página
 protocol.registerSchemesAsPrivileged([
@@ -27,11 +29,18 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 // Un archivo que solo está en la nube (iCloud, OneDrive) tiene tamaño pero no ocupa espacio en disco.
-// Consultar sus metadatos no lo descarga; abrirlo sí.
-const isCloudOnly = (stat) => process.platform === 'win32' && stat.size > 0 && stat.blocks === 0
+// Consultar sus metadatos no lo descarga; abrirlo sí. Solo aplica dentro de la carpeta del usuario:
+// en una carpeta de red el tamaño en disco no es fiable.
+const HOME = os.homedir().toLowerCase()
+const isCloudOnly = (stat, file) =>
+  process.platform === 'win32' && file.toLowerCase().startsWith(HOME) && stat.size > 0 && stat.blocks === 0
 
-// En el servidor, las personas y las mascotas van en carpetas principales distintas
-const KIND_DIRS = { personas: 'Personas', mascotas: 'Mascotas' }
+// Álbumes del servidor que usaba la versión anterior: Personas\nombre y Mascotas\nombre
+const LEGACY_KINDS = { personas: 'persona', mascotas: 'mascota' }
+
+// Carpeta oculta del servidor donde se guardan los datos de las fotos
+const CATALOG_DIR = '.memoir'
+const CATALOG_FILE = 'catalogo.json'
 
 // La carpeta del servidor debe ser una ruta absoluta a la que se pueda llegar
 async function checkServerDir(serverDir) {
@@ -47,8 +56,8 @@ async function checkServerDir(serverDir) {
 function safeFolderName(name) {
   const clean = String(name ?? '').trim()
   if (!clean) return ''
-  if (clean.length > 100 || /[<>:"/\\|?*]/.test(clean) || /[. ]$/.test(clean)) {
-    throw new Error('Nombre de carpeta no válido. No uses / \\ : * ? " < > | ni termines en punto.')
+  if (clean.length > 100 || /[<>:"/\\|?*]/.test(clean) || /[. ]$/.test(clean) || clean.startsWith('.')) {
+    throw new Error('Nombre de carpeta no válido. No uses / \\ : * ? " < > | ni empieces o termines en punto.')
   }
   return clean
 }
@@ -61,21 +70,22 @@ async function imagesIn(dir) {
   return names
     .map((name, i) => ({ name, stat: stats[i] }))
     .filter(({ stat }) => stat && stat.size >= MIN_BYTES)
-    .map(({ name, stat }) => ({ name, cloud: isCloudOnly(stat) }))
+    .map(({ name, stat }) => ({ name, cloud: isCloudOnly(stat, path.join(dir, name)) }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
 }
 
-let currentScan = null
+// Una búsqueda a la vez por canal: 'pc' (el equipo) y 'server' (la carpeta del servidor)
+const scans = new Map()
 
 // Recorre el disco por niveles (las carpetas cercanas aparecen primero) y envía lotes de carpetas con fotos
-async function scan(sender, roots) {
-  if (currentScan) currentScan.cancelled = true
-  const token = { cancelled: false }
-  currentScan = token
+async function scan(sender, roots, channel) {
+  scans.get(channel)?.cancel()
+  const token = { cancelled: false, cancel() { this.cancelled = true } }
+  scans.set(channel, token)
 
   let pending = []
   const flush = () => {
-    if (pending.length && !sender.isDestroyed()) sender.send('scan-batch', pending)
+    if (pending.length && !sender.isDestroyed()) sender.send('scan-batch', { channel, folders: pending })
     pending = []
   }
   const timer = setInterval(flush, 300)
@@ -91,7 +101,7 @@ async function scan(sender, roots) {
       continue // sin permisos o no existe
     }
     for (const e of entries) {
-      if (shouldSkip(e.name)) continue
+      if (shouldSkip(e.name, channel)) continue
       const full = path.join(dir, e.name)
       let target = full
       if (e.isSymbolicLink()) {
@@ -113,11 +123,20 @@ async function scan(sender, roots) {
     try {
       const imgs = await imagesIn(dir)
       if (imgs.length) {
-        pending.push({
-          path: dir,
-          name: path.basename(dir) || dir,
-          count: imgs.length,
-        })
+        const entry = { path: dir, name: path.basename(dir) || dir, count: imgs.length }
+        if (channel === 'server') {
+          // Los álbumes se muestran con su ruta dentro del servidor (por ejemplo "Viaje" o "Personas / Ana")
+          const parts = path.relative(roots[0], dir).split(path.sep)
+          entry.rel = parts.join('/')
+          entry.name = parts.join(' / ')
+          const kind = parts.length === 2 ? LEGACY_KINDS[parts[0].toLowerCase()] : null
+          if (kind) {
+            // Álbum de la versión anterior: se reconoce a la persona o mascota por el nombre de la carpeta
+            entry.legacy = { kind, name: parts[1] }
+            entry.files = imgs.map((img) => path.join(dir, img.name))
+          }
+        }
+        pending.push(entry)
       }
     } catch {
       // carpeta ilegible: se ignora
@@ -126,8 +145,8 @@ async function scan(sender, roots) {
 
   clearInterval(timer)
   flush()
-  if (currentScan === token) currentScan = null
-  if (!token.cancelled && !sender.isDestroyed()) sender.send('scan-done')
+  if (scans.get(channel) === token) scans.delete(channel)
+  if (!token.cancelled && !sender.isDestroyed()) sender.send('scan-done', { channel })
 }
 
 function createWindow() {
@@ -166,12 +185,38 @@ app.whenReady().then(() => {
     return canceled ? [] : filePaths
   })
 
-  ipcMain.handle('scan-start', (event, roots) => {
-    scan(event.sender, roots?.length ? roots : [os.homedir()])
+  ipcMain.handle('scan-start', (event, roots, channel) => {
+    scan(event.sender, roots?.length ? roots : [os.homedir()], channel === 'server' ? 'server' : 'pc')
   })
 
-  ipcMain.handle('scan-stop', () => {
-    if (currentScan) currentScan.cancelled = true
+  ipcMain.handle('scan-stop', (_event, channel) => {
+    scans.get(channel === 'server' ? 'server' : 'pc')?.cancel()
+  })
+
+  // Datos de las fotos del servidor (personas, mascotas, etiquetas), en una carpeta oculta del servidor.
+  // catalog-load falla si no se llega al servidor: así la app nunca guarda un catálogo vacío encima del real.
+  ipcMain.handle('catalog-load', async (_event, serverDir) => {
+    const file = path.join(await checkServerDir(serverDir), CATALOG_DIR, CATALOG_FILE)
+    let text
+    try {
+      text = await fs.readFile(file, 'utf8')
+    } catch {
+      return null // todavía no existe
+    }
+    try {
+      return JSON.parse(text)
+    } catch {
+      await fs.copyFile(file, file + '.bak') // archivo dañado: se conserva una copia
+      return null
+    }
+  })
+
+  ipcMain.handle('catalog-save', async (_event, serverDir, catalog) => {
+    const dir = path.join(await checkServerDir(serverDir), CATALOG_DIR)
+    await fs.mkdir(dir, { recursive: true })
+    const file = path.join(dir, CATALOG_FILE)
+    await fs.writeFile(file + '.tmp', JSON.stringify(catalog))
+    await fs.rename(file + '.tmp', file)
   })
 
   // Álbumes y etiquetas del usuario, guardados en la carpeta de datos de la app
@@ -210,7 +255,7 @@ app.whenReady().then(() => {
   ipcMain.handle('file-info', async (_event, file) => {
     if (!isImage(file)) return { exists: false, cloud: false }
     try {
-      return { exists: true, cloud: isCloudOnly(await fs.stat(file)) }
+      return { exists: true, cloud: isCloudOnly(await fs.stat(file), file) }
     } catch {
       return { exists: false, cloud: false }
     }
@@ -228,45 +273,30 @@ app.whenReady().then(() => {
     }
   })
 
-  // Copia la foto al servidor (una ruta de red o una unidad), una vez por cada persona o mascota
-  // indicada en targets ([{ kind: 'personas' | 'mascotas', name }]), y si se pide la mueve:
-  // la original va a la Papelera solo cuando todas las copias quedaron completas.
-  // Si algo falla se borran las copias de esta llamada, para no dejar duplicados al reintentar.
-  ipcMain.handle('send-to-server', async (_event, file, serverDir, targets, move) => {
+  // Copia la foto al álbum (carpeta) del servidor y, si se pide, la mueve: la original va a la Papelera
+  // solo cuando la copia quedó completa. Devuelve la ruta nueva de la foto.
+  ipcMain.handle('send-to-server', async (_event, file, serverDir, album, move) => {
     if (!path.isAbsolute(file) || !isImage(file)) throw new Error('Ruta no válida')
-    if (!Array.isArray(targets) || targets.length === 0 || targets.length > 20) {
-      throw new Error('Falta la persona o mascota de la foto')
-    }
-    const root = await checkServerDir(serverDir)
-    const destDirs = new Set(
-      targets.map(({ kind, name }) => {
-        if (!KIND_DIRS[kind]) throw new Error('Tipo de carpeta no válido')
-        const folder = safeFolderName(name)
-        if (!folder) throw new Error('Falta el nombre de la carpeta')
-        return path.join(root, KIND_DIRS[kind], folder)
-      }),
-    )
+    const folder = safeFolderName(album)
+    if (!folder) throw new Error('Falta el nombre del álbum')
+    const destDir = path.join(await checkServerDir(serverDir), folder)
     const origen = await fs.stat(file).catch(() => null)
     if (!origen) throw new Error('SOURCE_MISSING')
 
+    await fs.mkdir(destDir, { recursive: true })
     const ext = path.extname(file)
     const base = path.basename(file, ext)
-    const copies = []
+    let target = path.join(destDir, base + ext)
+    for (let n = 1; await fs.stat(target).then(() => true, () => false); n++) {
+      target = path.join(destDir, `${base} (${n})${ext}`) // no pisa fotos que ya estén en el servidor
+    }
     try {
-      for (const destDir of destDirs) {
-        await fs.mkdir(destDir, { recursive: true })
-        let target = path.join(destDir, base + ext)
-        for (let n = 1; await fs.stat(target).then(() => true, () => false); n++) {
-          target = path.join(destDir, `${base} (${n})${ext}`) // no pisa fotos que ya estén en el servidor
-        }
-        await fs.copyFile(file, target, fsConstants.COPYFILE_EXCL)
-        copies.push(target)
-        if ((await fs.stat(target)).size !== origen.size) {
-          throw new Error('La copia no coincide con la original. No se movió nada.')
-        }
+      await fs.copyFile(file, target, fsConstants.COPYFILE_EXCL)
+      if ((await fs.stat(target)).size !== origen.size) {
+        throw new Error('La copia no coincide con la original. No se movió nada.')
       }
     } catch (err) {
-      await Promise.all(copies.map((c) => fs.rm(c, { force: true })))
+      await fs.rm(target, { force: true })
       throw err
     }
     if (move) {
@@ -276,12 +306,15 @@ app.whenReady().then(() => {
         throw new Error('La foto se copió al servidor, pero no se pudo enviar la original a la Papelera.')
       }
     }
-    return copies
+    return target
   })
 
   // Manda la foto a la Papelera de reciclaje. En una carpeta sincronizada, la nube también la elimina.
+  // En una carpeta de red no hay Papelera: Windows borraría la foto para siempre, así que no se permite.
   ipcMain.handle('trash-file', async (_event, file) => {
     if (!path.isAbsolute(file) || !isImage(file)) throw new Error('Archivo no permitido')
+    const real = await fs.realpath.native(file).catch(() => file)
+    if (real.startsWith('\\\\')) throw new Error('Las fotos del servidor no se pueden eliminar desde la app.')
     await shell.trashItem(file)
   })
 
