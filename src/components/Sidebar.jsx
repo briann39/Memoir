@@ -35,9 +35,12 @@ function Sidebar({
   onRestore,
   onDropImage,
   pendingCount,
+  toDelete,
   sending,
   progress,
   onSendAll,
+  onDeleteMarked,
+  onClearDeleteMarks,
   onPick,
   onStop,
   onRescan,
@@ -120,7 +123,18 @@ function Sidebar({
                       active ? 'bg-slate-800 text-sky-400' : 'text-slate-300'
                     }`}
                   >
-                    <span className="min-w-0 flex-1 truncate">{img.name}</span>
+                    <span
+                      className={`min-w-0 flex-1 truncate ${
+                        toDelete.has(img.id) ? 'text-red-300 line-through' : ''
+                      }`}
+                    >
+                      {img.name}
+                    </span>
+                    {toDelete.has(img.id) && (
+                      <span title="Marcada para eliminar" aria-label="Marcada para eliminar">
+                        🗑
+                      </span>
+                    )}
                     {img.cloud && (
                       <span title="Solo en la nube" aria-label="Solo en la nube">
                         ☁️
@@ -329,21 +343,55 @@ function Sidebar({
         )}
       </nav>
 
-      {pendingCount > 0 && (
-        <div className="space-y-2 border-t border-slate-800 bg-slate-900 p-3">
-          <p className="text-sm">
-            {sending && progress
-              ? `Enviando ${progress.done} de ${progress.total}…`
-              : `${pendingCount} ${pendingCount === 1 ? 'foto lista' : 'fotos listas'} para enviar`}
-          </p>
-          <button
-            type="button"
-            disabled={sending}
-            onClick={onSendAll}
-            className="w-full rounded-lg bg-sky-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
-          >
-            {sending ? 'Enviando…' : '📤 Enviar todas'}
-          </button>
+      {(pendingCount > 0 || toDelete.size > 0 || sending) && (
+        <div className="space-y-3 border-t border-slate-800 bg-slate-900 p-3">
+          {sending && progress && (
+            <p className="text-sm">
+              {progress.label} {progress.done} de {progress.total}…
+            </p>
+          )}
+
+          {toDelete.size > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm">
+                {toDelete.size} {toDelete.size === 1 ? 'foto marcada' : 'fotos marcadas'} para eliminar
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={sending}
+                  onClick={onDeleteMarked}
+                  className="flex-1 rounded-lg bg-red-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-red-400 disabled:opacity-50"
+                >
+                  🗑 Eliminar todas
+                </button>
+                <button
+                  type="button"
+                  disabled={sending}
+                  onClick={onClearDeleteMarks}
+                  className="rounded-lg border border-slate-700 px-3 py-2 text-sm transition hover:bg-slate-800 disabled:opacity-50"
+                >
+                  Quitar marcas
+                </button>
+              </div>
+            </div>
+          )}
+
+          {pendingCount > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm">
+                {pendingCount} {pendingCount === 1 ? 'foto lista' : 'fotos listas'} para enviar
+              </p>
+              <button
+                type="button"
+                disabled={sending}
+                onClick={onSendAll}
+                className="w-full rounded-lg bg-sky-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
+              >
+                📤 Enviar todas
+              </button>
+            </div>
+          )}
         </div>
       )}
     </aside>

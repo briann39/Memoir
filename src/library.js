@@ -7,6 +7,7 @@ export const EMPTY_LIBRARY = {
   hiddenFolders: [],
   serverFolder: '',
   importedFolders: [],
+  toDelete: [], // fotos marcadas para eliminar; se borran juntas cuando el usuario lo confirma
 }
 
 // Álbum al que va una foto que se envía sin estar en ningún álbum de la app
@@ -29,6 +30,7 @@ const normalize = (lib) => ({
   hiddenFolders: lib?.hiddenFolders ?? [],
   serverFolder: lib?.serverFolder ?? '',
   importedFolders: lib?.importedFolders ?? [],
+  toDelete: lib?.toDelete ?? [],
 })
 
 // ---- Fotos del servidor ----
@@ -167,7 +169,7 @@ export function sendPlan(lib) {
     if (ids.some((id) => people.has(id))) files.add(file)
   }
   return [...files]
-    .filter((file) => !isServerPath(lib, file))
+    .filter((file) => !isServerPath(lib, file) && !lib.toDelete.includes(file))
     .map((file) => ({ file, album: albumOf.get(file) ?? NO_ALBUM }))
     .sort((a, b) => a.file.localeCompare(b.file))
 }
@@ -189,7 +191,7 @@ export function toggleImageTag(lib, file, tagId) {
   return { ...lib, imageTags }
 }
 
-// Quita una foto eliminada de todos los álbumes y etiquetas
+// Quita una foto eliminada de todos los álbumes, etiquetas y marcas
 export function forgetImage(lib, file) {
   const imageTags = { ...lib.imageTags }
   delete imageTags[file]
@@ -197,7 +199,17 @@ export function forgetImage(lib, file) {
     ...lib,
     imageTags,
     albums: lib.albums.map((a) => ({ ...a, images: a.images.filter((f) => f !== file) })),
+    toDelete: lib.toDelete.filter((f) => f !== file),
   }
+}
+
+// Marca o desmarca una foto para eliminarla después; no se borra nada todavía
+export function toggleDelete(lib, file) {
+  return { ...lib, toDelete: toggle(lib.toDelete, file) }
+}
+
+export function clearDeleteMarks(lib) {
+  return { ...lib, toDelete: [] }
 }
 
 // Carpetas descartadas del visor (no se borran del disco)

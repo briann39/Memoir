@@ -8,6 +8,7 @@ import {
   addTag,
   addToAlbum,
   buildCatalog,
+  clearDeleteMarks,
   EMPTY_LIBRARY,
   forgetImage,
   hideFolder,
@@ -23,6 +24,7 @@ import {
   restoreFolder,
   saveLibrary,
   sendPlan,
+  toggleDelete,
   toggleImageTag,
   toggleInAlbum,
   validFolderName,
@@ -306,25 +308,47 @@ function App() {
     setLibrary((l) => addAlbum(l, name))
   }
 
-  // Manda la foto a la Papelera. Si la carpeta está sincronizada con la nube, allí también se elimina.
-  const deleteImage = async () => {
-    if (!current || selected.key === LOOSE) return
-    if (isServerPath(library, current.id)) {
-      window.alert('Las fotos del servidor no se pueden eliminar desde la app: en una carpeta de red no hay Papelera.')
-      return
-    }
-    const file = current.id
-    const aviso = `¿Eliminar "${current.name}"?
+  // Eliminar es en dos pasos: primero se marcan las fotos (no se borra nada) y después se borran juntas
+  const toDelete = useMemo(() => new Set(library.toDelete), [library.toDelete])
 
-Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, también se eliminará de iCloud.`
-    if (!window.confirm(aviso)) return
-    try {
-      await api.trashFile(file)
-    } catch {
-      window.alert('No se pudo eliminar la foto.')
-      return
+  const toggleDeleteMark = () => {
+    if (current && selected.key !== LOOSE && !isServerPath(library, current.id)) {
+      setLibrary((l) => toggleDelete(l, current.id))
     }
-    removeFromViews([file])
+  }
+
+  // Manda las fotos marcadas a la Papelera. Si están en una carpeta de iCloud, también se eliminan de allí.
+  const deleteMarked = async () => {
+    if (sending || !library.toDelete.length) return
+    const files = [...library.toDelete]
+    const aviso = `¿Eliminar ${files.length === 1 ? 'la foto marcada' : `las ${files.length} fotos marcadas`}?\n\nIrán a la Papelera de reciclaje. Si están en una carpeta de iCloud, también se eliminarán de iCloud.`
+    if (!window.confirm(aviso)) return
+
+    setSending(true)
+    setProgress({ label: 'Eliminando', done: 0, total: files.length })
+    const done = []
+    let failure = null
+    for (const file of files) {
+      try {
+        if ((await api.fileInfo(file)).exists) await api.trashFile(file)
+        done.push(file) // si ya no existía, solo se quita de las listas
+      } catch (err) {
+        failure = cleanError(err)
+        break
+      }
+      setProgress({ label: 'Eliminando', done: done.length, total: files.length })
+    }
+    if (done.length) removeFromViews(done)
+    setSending(false)
+    setProgress(null)
+
+    if (failure) {
+      window.alert(
+        `Se eliminaron ${done.length} de ${files.length} fotos.\n\n${failure}\n\nLas demás siguen marcadas: puedes volver a intentarlo.`,
+      )
+    } else {
+      setNotice(`${done.length} ${done.length === 1 ? 'foto eliminada' : 'fotos eliminadas'}`)
+    }
   }
 
   // Fotos de este equipo que están en un álbum de la app o tienen persona o mascota: se envían juntas,
@@ -348,7 +372,7 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
     if (!window.confirm(aviso)) return
 
     setSending(true)
-    setProgress({ done: 0, total: plan.length })
+    setProgress({ label: 'Enviando', done: 0, total: plan.length })
     const sent = []
     const missing = []
     let failure = null
@@ -362,7 +386,7 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
           break
         }
       }
-      setProgress({ done: sent.length + missing.length, total: plan.length })
+      setProgress({ label: 'Enviando', done: sent.length + missing.length, total: plan.length })
     }
     if (sent.length) {
       setLibrary((l) => moveMeta(l, sent)) // los datos pasan a la ruta nueva, en el servidor
@@ -467,9 +491,12 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
         onDropImage={dropInAlbum}
         onRestore={(folder) => setLibrary((l) => restoreFolder(l, folder))}
         pendingCount={api ? plan.length : 0}
+        toDelete={toDelete}
         sending={sending}
         progress={progress}
         onSendAll={sendAll}
+        onDeleteMarked={deleteMarked}
+        onClearDeleteMarks={() => setLibrary(clearDeleteMarks)}
         onPick={(key, index) => setSelected({ key, index })}
         onStop={stop}
         onRescan={rescan}
@@ -495,8 +522,9 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
             index={selected.index}
             total={images.length}
             persistent={canEdit}
-            canDelete={canEdit && !isServerPath(library, current.id)}
-            onDelete={deleteImage}
+            canMarkDelete={canEdit && !isServerPath(library, current.id)}
+            markedDelete={toDelete.has(current.id)}
+            onToggleDelete={toggleDeleteMark}
             who={who}
             sending={sending}
             onPrev={prev}

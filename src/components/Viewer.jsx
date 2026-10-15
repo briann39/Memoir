@@ -2,7 +2,19 @@ import { useEffect, useState } from 'react'
 import { startImageDrag } from '../dnd'
 
 // persistent: la foto es un archivo del disco (no una imagen suelta)
-function Viewer({ image, index, total, persistent, canDelete, sending, who, onPrev, onNext, onDelete }) {
+function Viewer({
+  image,
+  index,
+  total,
+  persistent,
+  canMarkDelete,
+  markedDelete,
+  sending,
+  who,
+  onPrev,
+  onNext,
+  onToggleDelete,
+}) {
   const api = window.electronAPI
   const needsCheck = persistent && Boolean(api)
   const [info, setInfo] = useState(null) // { id, exists, cloud }
@@ -14,11 +26,11 @@ function Viewer({ image, index, total, persistent, canDelete, sending, who, onPr
       if (e.target instanceof HTMLInputElement) return
       if (e.key === 'ArrowLeft') onPrev()
       if (e.key === 'ArrowRight') onNext()
-      if (e.key === 'Delete' && canDelete) onDelete()
+      if (e.key === 'Delete' && canMarkDelete) onToggleDelete() // solo marca: no borra nada
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onPrev, onNext, onDelete, canDelete])
+  }, [onPrev, onNext, onToggleDelete, canMarkDelete])
 
   // Antes de cargar la imagen se mira si está solo en la nube: abrirla la descargaría
   useEffect(() => {
@@ -68,19 +80,30 @@ function Viewer({ image, index, total, persistent, canDelete, sending, who, onPr
           <p className="text-sm text-slate-400">
             {index + 1} / {total}
           </p>
-          {canDelete && (
+          {canMarkDelete && (
             <button
               type="button"
-              title="Eliminar (Supr)"
+              title="Marcar para eliminar (Supr). No se borra hasta que pulses «Eliminar todas»."
+              aria-pressed={markedDelete}
               disabled={sending}
-              onClick={onDelete}
-              className="rounded-lg bg-red-500/15 px-3 py-1 text-sm text-red-300 transition hover:bg-red-500 hover:text-white disabled:opacity-50"
+              onClick={onToggleDelete}
+              className={`rounded-lg px-3 py-1 text-sm transition disabled:opacity-50 ${
+                markedDelete
+                  ? 'bg-red-500 text-white hover:bg-red-400'
+                  : 'bg-red-500/15 text-red-300 hover:bg-red-500 hover:text-white'
+              }`}
             >
-              🗑 Eliminar
+              {markedDelete ? '🗑 Marcada · quitar marca' : '🗑 Marcar para eliminar'}
             </button>
           )}
         </div>
       </div>
+
+      {markedDelete && (
+        <p className="bg-red-500/15 px-6 py-1.5 text-center text-xs text-red-300">
+          Marcada para eliminar. Se borrará cuando pulses «Eliminar todas» en la barra lateral.
+        </p>
+      )}
 
       <div className="relative flex min-h-0 flex-1 items-center justify-center p-6">
         {!checked ? null : missing ? (
@@ -118,7 +141,9 @@ function Viewer({ image, index, total, persistent, canDelete, sending, who, onPr
             alt={image.name}
             draggable={persistent}
             onDragStart={(e) => startImageDrag(e, image.id)}
-            className="max-h-full max-w-full rounded-lg object-contain"
+            className={`max-h-full max-w-full rounded-lg object-contain ${
+              markedDelete ? 'opacity-50 ring-2 ring-red-500' : ''
+            }`}
           />
         )}
         {total > 1 && (
