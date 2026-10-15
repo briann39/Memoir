@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolders: () => ipcRenderer.invoke('select-folders'),
   startScan: (roots) => ipcRenderer.invoke('scan-start', roots),
   stopScan: () => ipcRenderer.invoke('scan-stop'),
+  loadLibrary: () => ipcRenderer.invoke('library-load'),
+  saveLibrary: (library) => ipcRenderer.invoke('library-save', library),
   readFolder: (folder) => ipcRenderer.invoke('read-folder', folder),
   onScanBatch: (cb) => {
     const handler = (_e, folders) => cb(folders)

@@ -131,6 +131,30 @@ app.whenReady().then(() => {
     if (currentScan) currentScan.cancelled = true
   })
 
+  // Álbumes y etiquetas del usuario, guardados en la carpeta de datos de la app
+  const libraryFile = path.join(app.getPath('userData'), 'library.json')
+
+  ipcMain.handle('library-load', async () => {
+    let text
+    try {
+      text = await fs.readFile(libraryFile, 'utf8')
+    } catch {
+      return null // todavía no existe
+    }
+    try {
+      return JSON.parse(text)
+    } catch {
+      await fs.copyFile(libraryFile, libraryFile + '.bak') // archivo dañado: se conserva una copia
+      return null
+    }
+  })
+
+  ipcMain.handle('library-save', async (_event, library) => {
+    const tmp = libraryFile + '.tmp'
+    await fs.writeFile(tmp, JSON.stringify(library, null, 2))
+    await fs.rename(tmp, libraryFile)
+  })
+
   ipcMain.handle('read-folder', async (_event, folder) => {
     const names = await imagesIn(folder)
     return names.map((name) => {

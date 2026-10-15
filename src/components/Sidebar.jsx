@@ -1,8 +1,18 @@
 import { useState } from 'react'
 
+function SectionTitle({ children }) {
+  return (
+    <h2 className="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+      {children}
+    </h2>
+  )
+}
+
 function Sidebar({
   folders,
   looseCount,
+  albums,
+  tags,
   scanning,
   canScan,
   expanded,
@@ -23,10 +33,53 @@ function Sidebar({
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
   const total = folders.reduce((sum, f) => sum + f.count, 0)
 
-  // Las imágenes sueltas van fijas arriba, como una carpeta más
-  const entries = looseCount
-    ? [{ path: '__loose__', name: 'Imágenes sueltas', count: looseCount }, ...visible]
-    : visible
+  // Entrada desplegable: carpeta real o colección virtual (álbum, etiqueta, imágenes sueltas)
+  const renderEntry = (f) => {
+    const isOpen = expanded.has(f.path)
+    const files = filesByKey[f.path]
+    return (
+      <div key={f.path}>
+        <button
+          type="button"
+          title={f.virtual ? f.name : f.path}
+          aria-expanded={isOpen}
+          onClick={() => onToggle(f)}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-slate-800"
+        >
+          <span aria-hidden className="w-3 text-xs text-slate-500">
+            {isOpen ? '▾' : '▸'}
+          </span>
+          <span aria-hidden>{f.icon ?? (isOpen ? '📂' : '📁')}</span>
+          <span className="min-w-0 flex-1 truncate">{f.name}</span>
+          <span className="shrink-0 text-xs text-slate-500">{f.count}</span>
+        </button>
+
+        {isOpen && (
+          <ul className="mb-1 ml-5 border-l border-slate-800 pl-2">
+            {!files && <li className="px-3 py-1 text-xs text-slate-500">Cargando…</li>}
+            {files?.length === 0 && <li className="px-3 py-1 text-xs text-slate-500">Vacío</li>}
+            {files?.map((img, i) => {
+              const active = selected?.key === f.path && selected.index === i
+              return (
+                <li key={img.id}>
+                  <button
+                    type="button"
+                    title={img.name}
+                    onClick={() => onPick(f.path, i)}
+                    className={`block w-full truncate rounded px-3 py-1 text-left text-xs transition hover:bg-slate-800 ${
+                      active ? 'bg-slate-800 text-sky-400' : 'text-slate-300'
+                    }`}
+                  >
+                    {img.name}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+    )
+  }
 
   return (
     <aside className="flex w-72 shrink-0 flex-col border-r border-slate-800 bg-slate-950">
@@ -61,72 +114,53 @@ function Sidebar({
         )}
       </div>
 
-      {canScan && (
-        <div className="flex items-center justify-between gap-2 px-4 pb-2 text-xs text-slate-400">
-          <span className="truncate">
-            {scanning ? 'Buscando…' : `${folders.length} carpetas · ${total} fotos`}
-          </span>
-          <button
-            type="button"
-            onClick={scanning ? onStop : onRescan}
-            className="shrink-0 rounded px-2 py-1 transition hover:bg-slate-800 hover:text-slate-100"
-          >
-            {scanning ? 'Detener' : 'Volver a buscar'}
-          </button>
-        </div>
-      )}
-
       <nav className="flex-1 overflow-y-auto px-2 pb-4">
-        {entries.length === 0 && (
-          <p className="px-3 py-6 text-center text-sm text-slate-500">
-            {!canScan ? '' : scanning ? 'Buscando fotos…' : 'No se encontraron carpetas'}
-          </p>
+        {looseCount > 0 &&
+          renderEntry({
+            path: '__loose__',
+            name: 'Imágenes sueltas',
+            count: looseCount,
+            virtual: true,
+            icon: '🖼️',
+          })}
+
+        {albums.length > 0 && (
+          <>
+            <SectionTitle>Álbumes</SectionTitle>
+            {albums.map(renderEntry)}
+          </>
         )}
-        {entries.map((f) => {
-          const isOpen = expanded.has(f.path)
-          const files = filesByKey[f.path]
-          return (
-            <div key={f.path}>
+
+        {tags.length > 0 && (
+          <>
+            <SectionTitle>Etiquetas</SectionTitle>
+            {tags.map(renderEntry)}
+          </>
+        )}
+
+        {canScan && (
+          <>
+            <div className="flex items-center justify-between gap-2 pr-1">
+              <SectionTitle>Carpetas</SectionTitle>
               <button
                 type="button"
-                title={f.path}
-                aria-expanded={isOpen}
-                onClick={() => onToggle(f)}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-slate-800"
+                onClick={scanning ? onStop : onRescan}
+                className="mt-2 shrink-0 rounded px-2 py-0.5 text-xs text-slate-400 transition hover:bg-slate-800 hover:text-slate-100"
               >
-                <span aria-hidden className="w-3 text-xs text-slate-500">
-                  {isOpen ? '▾' : '▸'}
-                </span>
-                <span aria-hidden>{isOpen ? '📂' : '📁'}</span>
-                <span className="min-w-0 flex-1 truncate">{f.name}</span>
-                <span className="shrink-0 text-xs text-slate-500">{f.count}</span>
+                {scanning ? 'Detener' : 'Volver a buscar'}
               </button>
-
-              {isOpen && (
-                <ul className="mb-1 ml-5 border-l border-slate-800 pl-2">
-                  {!files && <li className="px-3 py-1 text-xs text-slate-500">Cargando…</li>}
-                  {files?.map((img, i) => {
-                    const active = selected?.key === f.path && selected.index === i
-                    return (
-                      <li key={img.id}>
-                        <button
-                          type="button"
-                          title={img.name}
-                          onClick={() => onPick(f.path, i)}
-                          className={`block w-full truncate rounded px-3 py-1 text-left text-xs transition hover:bg-slate-800 ${
-                            active ? 'bg-slate-800 text-sky-400' : 'text-slate-300'
-                          }`}
-                        >
-                          {img.name}
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
             </div>
-          )
-        })}
+            <p className="px-3 pb-1 text-xs text-slate-500">
+              {scanning ? 'Buscando…' : `${folders.length} carpetas · ${total} fotos`}
+            </p>
+            {visible.length === 0 && (
+              <p className="px-3 py-6 text-center text-sm text-slate-500">
+                {scanning ? 'Buscando fotos…' : 'No se encontraron carpetas'}
+              </p>
+            )}
+            {visible.map(renderEntry)}
+          </>
+        )}
       </nav>
     </aside>
   )
