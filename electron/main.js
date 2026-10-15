@@ -1,9 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, net, nativeImage, protocol, shell } from 'electron'
-import { constants as fsConstants } from 'node:fs'
+import { constants as fsConstants, realpath as realpathCallback } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { promisify } from 'node:util'
+
+// La versión «native» resuelve una unidad de red (Z:) a su ruta real \\servidor\carpeta
+const realpathNative = promisify(realpathCallback.native)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const devUrl = process.env.VITE_DEV_SERVER_URL
@@ -313,7 +317,7 @@ app.whenReady().then(() => {
   // En una carpeta de red no hay Papelera: Windows borraría la foto para siempre, así que no se permite.
   ipcMain.handle('trash-file', async (_event, file) => {
     if (!path.isAbsolute(file) || !isImage(file)) throw new Error('Archivo no permitido')
-    const real = await fs.realpath.native(file).catch(() => file)
+    const real = await realpathNative(file).catch(() => file)
     if (real.startsWith('\\\\')) throw new Error('Las fotos del servidor no se pueden eliminar desde la app.')
     await shell.trashItem(file)
   })
