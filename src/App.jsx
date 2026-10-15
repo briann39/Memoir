@@ -1,523 +1,57 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { CircleCheck, Images } from 'lucide-react'
+import { api } from './api'
 import { useDialogs } from './dialogs-context'
-import { cleanError } from './errors'
+import { FILTER } from './keys'
+import { isServerPath, peopleOf } from './library'
+import { SHORTCUTS_DIALOG } from './shortcuts'
 import RightPanel from './components/RightPanel'
 import Sidebar from './components/Sidebar'
 import Viewer from './components/Viewer'
-import {
-  addAlbum,
-  addTag,
-  addToAlbum,
-  buildCatalog,
-  clearDeleteMarks,
-  EMPTY_LIBRARY,
-  forgetImage,
-  hideFolder,
-  imageFromPath,
-  importLegacyFolder,
-  isServerPath,
-  kindOf,
-  loadLibrary,
-  mergeCatalog,
-  moveMeta,
-  removeAlbum,
-  removeTag,
-  restoreFolder,
-  saveLibrary,
-  sendPlan,
-  toggleDelete,
-  toggleImageTag,
-  toggleInAlbum,
-  validFolderName,
-} from './library'
+import { useBatchOps } from './hooks/useBatchOps'
+import { useBrowser } from './hooks/useBrowser'
+import { useCollections } from './hooks/useCollections'
+import { useLibrary } from './hooks/useLibrary'
+import { useLibraryActions } from './hooks/useLibraryActions'
+import { useNotice } from './hooks/useNotice'
+import { usePcFolders } from './hooks/usePcFolders'
+import { usePeopleShortcuts } from './hooks/usePeopleShortcuts'
+import { useServer } from './hooks/useServer'
 
-const api = window.electronAPI
-const LOOSE = '__loose__'
-const FILTER = '__filter__'
-// Entradas de la barra lateral que no son carpetas del disco: su contenido sale de la biblioteca
-const VIRTUAL = new Set(['album', 'persona', 'mascota', 'tag', 'filter', 'loose'])
-
-const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true })
-const plural = (count, one, many) => `${count.toLocaleString('es')} ${count === 1 ? one : many}`
-
+// La app solo junta las piezas: cada hook se ocupa de una cosa (ver src/hooks)
 function App() {
   const dialogs = useDialogs()
-  const [folders, setFolders] = useState([])
-  const [scanning, setScanning] = useState(Boolean(api)) // la app de escritorio escanea al iniciar
-  const [expanded, setExpanded] = useState(() => new Set())
-  const [filesByKey, setFilesByKey] = useState({}) // carpeta -> imágenes (se cargan al abrirla)
-  const [loose, setLoose] = useState([])
-  const [selected, setSelected] = useState(null) // { key, index }
-  const [dragging, setDragging] = useState(false)
-  const [sending, setSending] = useState(false) // hay un envío o un borrado en curso
-  const [progress, setProgress] = useState(null) // { label, done, total } mientras dura
-  const [notice, setNotice] = useState(null)
+  const [notice, setNotice] = useNotice()
+  const { library, setLibrary, ready } = useLibrary()
+  const pc = usePcFolders()
+  const server = useServer({ library, setLibrary, libraryReady: ready, setNotice })
+  const collections = useCollections(library)
+  const browser = useBrowser(collections)
+  const ops = useBatchOps({ library, setLibrary, server, browser, pc, dialogs, setNotice })
+
   const [detailsOpen, setDetailsOpen] = useState(() => window.innerWidth >= 1280) // en ventanas estrechas empieza oculto
-  const [library, setLibrary] = useState(EMPTY_LIBRARY)
-  const [libraryReady, setLibraryReady] = useState(false)
-  const [serverFolders, setServerFolders] = useState([]) // álbumes (carpetas) del servidor
-  const [serverStatus, setServerStatus] = useState({ root: '', state: 'loading' })
-  const [serverTick, setServerTick] = useState(0) // sube para reintentar la conexión
-  const [filterIds, setFilterIds] = useState([]) // personas o mascotas elegidas para filtrar
-  const [filterMode, setFilterMode] = useState('all') // 'all': salen todas · 'any': sale alguna
-  const catalogRoot = useRef(null) // servidor cuyo catálogo se cargó bien; solo entonces se guarda
-  const cancelRef = useRef(false) // el usuario pidió cancelar el envío o el borrado
+  const [dragging, setDragging] = useState(false)
   const inputRef = useRef(null)
-  const serverRoot = library.serverFolder
 
-  const startScan = useCallback((roots) => {
-    setScanning(true)
-    api.startScan(roots, 'pc')
-  }, [])
-
-  // Búsqueda inicial del equipo (solo en la app de escritorio) y avisos de las búsquedas
-  useEffect(() => {
-    if (!api) return
-    const offBatch = api.onScanBatch((channel, lote) => {
-      if (channel === 'pc') {
-        setFolders((prev) => {
-          const known = new Set(prev.map((f) => f.path))
-          return [...prev, ...lote.filter((f) => !known.has(f.path))]
-        })
-        return
-      }
-      // Servidor: los álbumes de la versión anterior (Personas\Ana) dan sus datos a las fotos, una sola vez
-      setLibrary((l) => lote.filter((f) => f.legacy).reduce((lib, f) => importLegacyFolder(lib, f), l))
-      setServerFolders((prev) => {
-        const known = new Set(prev.map((f) => f.path))
-        const nuevos = lote.filter((f) => !known.has(f.path)).map((f) => ({ ...f, files: undefined }))
-        return [...prev, ...nuevos]
-      })
-    })
-    const offDone = api.onScanDone((channel) => {
-      if (channel === 'pc') setScanning(false)
-      else setServerStatus((s) => (s.state === 'scanning' ? { ...s, state: 'ready' } : s))
-    })
-    api.startScan(undefined, 'pc')
-    return () => {
-      offBatch()
-      offDone()
-      api.stopScan('pc')
-    }
-  }, [])
-
-  // Álbumes, etiquetas, personas y mascotas: se cargan al iniciar y se guardan en cada cambio
-  useEffect(() => {
-    loadLibrary().then((lib) => {
-      setLibrary(lib)
-      setLibraryReady(true)
-    })
-  }, [])
-
-  useEffect(() => {
-    if (libraryReady) saveLibrary(library)
-  }, [library, libraryReady])
-
-  // Servidor: se leen primero sus datos (catálogo) y después sus álbumes. Si no hay conexión no se toca nada.
-  useEffect(() => {
-    if (!api || !libraryReady || !serverRoot) return
-    let stale = false
-    api
-      .loadCatalog(serverRoot)
-      .then((catalog) => {
-        if (stale) return
-        catalogRoot.current = serverRoot
-        setLibrary((l) => mergeCatalog(l, catalog))
-        setServerFolders([])
-        setServerStatus({ root: serverRoot, state: 'scanning' })
-        api.startScan([serverRoot], 'server')
-      })
-      .catch((err) => {
-        if (stale) return
-        catalogRoot.current = null
-        setServerStatus({ root: serverRoot, state: 'offline', error: cleanError(err) })
-      })
-    return () => {
-      stale = true
-      catalogRoot.current = null
-      api.stopScan('server')
-    }
-  }, [libraryReady, serverRoot, serverTick])
-
-  // Los datos de las fotos del servidor se guardan también en el servidor
-  useEffect(() => {
-    if (!api || !serverRoot || catalogRoot.current !== serverRoot) return
-    const timer = setTimeout(() => {
-      api
-        .saveCatalog(serverRoot, buildCatalog(library))
-        .catch(() => setNotice('No se pudieron guardar los datos en el servidor.'))
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [library, serverRoot])
-
-  const serverState = !serverRoot ? 'none' : serverStatus.root === serverRoot ? serverStatus.state : 'loading'
-
-  const retryServer = () => {
-    setServerStatus({ root: serverRoot, state: 'loading' })
-    setServerTick((t) => t + 1)
-  }
-
-  // Colecciones virtuales: el contenido de cada álbum de la app y de cada etiqueta
-  const virtualFiles = useMemo(() => {
-    const map = {}
-    for (const album of library.albums) map[`album:${album.id}`] = album.images.map(imageFromPath)
-    for (const tag of library.tags) map[`tag:${tag.id}`] = []
-    for (const [file, ids] of Object.entries(library.imageTags)) {
-      for (const id of ids) map[`tag:${id}`]?.push(imageFromPath(file))
-    }
-    for (const tag of library.tags) map[`tag:${tag.id}`].sort(byName)
-    return map
-  }, [library])
-
-  const albumEntries = useMemo(
-    () =>
-      library.albums.map((a) => ({
-        path: `album:${a.id}`,
-        name: a.name,
-        count: a.images.length,
-        kind: 'album',
-        albumId: a.id,
-      })),
-    [library.albums],
-  )
-  const tagEntries = useMemo(
-    () =>
-      library.tags.map((t) => ({
-        path: `tag:${t.id}`,
-        name: t.name,
-        count: virtualFiles[`tag:${t.id}`].length,
-        kind: kindOf(t),
-      })),
-    [library.tags, virtualFiles],
-  )
-
-  // Filtro por personas y mascotas: fotos donde salen todas las elegidas, o alguna de ellas
-  const people = useMemo(() => library.tags.filter((t) => kindOf(t) !== 'tag'), [library.tags])
-  const activeFilter = useMemo(
-    () => filterIds.filter((id) => people.some((t) => t.id === id)),
-    [filterIds, people],
-  )
-  const filterResults = useMemo(() => {
-    if (!activeFilter.length) return []
-    const match = filterMode === 'all' ? 'every' : 'some'
-    return Object.entries(library.imageTags)
-      .filter(([, ids]) => activeFilter[match]((id) => ids.includes(id)))
-      .map(([file]) => imageFromPath(file))
-      .sort(byName)
-  }, [library.imageTags, activeFilter, filterMode])
-  const filterEntry = activeFilter.length
-    ? { path: FILTER, name: 'Resultado', count: filterResults.length, kind: 'filter' }
-    : null
-
-  // Las primeras nueve personas y mascotas tienen atajo de teclado (1 a 9), en el orden del panel de detalles
-  const numbered = useMemo(() => {
-    const ordered = [...people.filter((t) => kindOf(t) === 'persona'), ...people.filter((t) => kindOf(t) === 'mascota')]
-    return new Map(ordered.slice(0, 9).map((t, i) => [t.id, i + 1]))
-  }, [people])
-
-  const toggleFilter = (tagId) => {
-    setFilterIds((prev) => (prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]))
-    setExpanded((prev) => new Set(prev).add(FILTER))
-  }
-
-  const allFiles = useMemo(
-    () => ({ ...filesByKey, [LOOSE]: loose, [FILTER]: filterResults, ...virtualFiles }),
-    [filesByKey, loose, filterResults, virtualFiles],
-  )
+  const { current, selected, persistent } = browser
+  const actions = useLibraryActions(setLibrary, current?.id)
+  usePeopleShortcuts({
+    enabled: persistent,
+    file: current?.id,
+    numbered: collections.numbered,
+    setLibrary,
+  })
 
   // Las carpetas descartadas no se muestran, aunque la búsqueda las vuelva a encontrar
   const shownFolders = useMemo(
-    () => folders.filter((f) => !library.hiddenFolders.includes(f.path)),
-    [folders, library.hiddenFolders],
+    () => pc.folders.filter((f) => !library.hiddenFolders.includes(f.path)),
+    [pc.folders, library.hiddenFolders],
   )
-
-  const discardFolder = (entry) => {
-    setLibrary((l) => hideFolder(l, entry.path))
-    setSelected((s) => (s?.key === entry.path ? null : s))
-  }
-
-  const rescan = () => {
-    setFolders([])
-    setExpanded(new Set())
-    setFilesByKey({})
-    setSelected(null)
-    startScan()
-  }
-
-  const stop = () => {
-    api.stopScan('pc')
-    setScanning(false)
-  }
-
-  const addFolder = async () => {
-    const roots = await api.selectFolders()
-    if (roots.length) startScan(roots)
-  }
-
-  // Abre o cierra una carpeta en el explorador; sus imágenes se leen la primera vez
-  const toggleFolder = async (entry) => {
-    const abierta = expanded.has(entry.path)
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (abierta) next.delete(entry.path)
-      else next.add(entry.path)
-      return next
-    })
-    if (abierta || VIRTUAL.has(entry.kind) || filesByKey[entry.path]) return
-    const images = await api.readFolder(entry.path)
-    setFilesByKey((prev) => ({ ...prev, [entry.path]: images }))
-  }
-
-  const images = selected ? allFiles[selected.key] : null
-  const current = images?.[selected.index]
-
-  const step = useCallback(
-    (delta) =>
-      setSelected((s) => {
-        const total = s ? allFiles[s.key]?.length : 0
-        if (!total) return s
-        return { ...s, index: (s.index + delta + total) % total }
-      }),
-    [allFiles],
-  )
-  const prev = useCallback(() => step(-1), [step])
-  const next = useCallback(() => step(1), [step])
-
-  const addFiles = (fileList) => {
-    const nuevas = Array.from(fileList)
-      .filter((file) => file.type.startsWith('image/'))
-      .map((file) => ({
-        id: crypto.randomUUID(),
-        name: file.name,
-        url: URL.createObjectURL(file),
-      }))
-    if (!nuevas.length) return
-    setSelected({ key: LOOSE, index: loose.length })
-    setLoose((prev) => [...prev, ...nuevas])
-    setExpanded((prev) => new Set(prev).add(LOOSE))
-  }
 
   const onDrop = (e) => {
     e.preventDefault()
     setDragging(false)
-    addFiles(e.dataTransfer.files)
-  }
-
-  useEffect(() => {
-    if (!notice) return
-    const timer = setTimeout(() => setNotice(null), 4500)
-    return () => clearTimeout(timer)
-  }, [notice])
-
-  const dropInAlbum = (albumId, file) => setLibrary((l) => addToAlbum(l, albumId, file))
-
-  // Motivo por el que un nombre de álbum no sirve (los álbumes son carpetas del servidor)
-  const albumCheck = (name) => {
-    if (!validFolderName(name)) return 'No uses / \\ : * ? " < > | ni empieces o termines con un punto.'
-    if (library.albums.some((a) => a.name.toLowerCase() === name.toLowerCase())) return 'Ya existe un álbum con ese nombre.'
-    return null
-  }
-
-  const canEdit = Boolean(current) && selected.key !== LOOSE
-
-  // Personas y mascotas indicadas en la foto que se está viendo
-  const who = canEdit
-    ? people
-        .filter((t) => (library.imageTags[current.id] ?? []).includes(t.id))
-        .map((t) => ({ id: t.id, name: t.name, kind: kindOf(t) }))
-    : []
-
-  // Teclas 1 a 9: indican o quitan a la persona o mascota con ese número en la foto que se está viendo
-  useEffect(() => {
-    const onKey = (e) => {
-      if (!/^[1-9]$/.test(e.key) || e.ctrlKey || e.metaKey || e.altKey || !canEdit) return
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      const entry = [...numbered].find(([, num]) => num === Number(e.key))
-      if (entry) setLibrary((l) => toggleImageTag(l, current.id, entry[0]))
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [canEdit, current, numbered])
-
-  const showShortcuts = () =>
-    dialogs.alert({
-      title: 'Atajos de teclado',
-      items: [
-        { label: 'Foto anterior o siguiente', value: '← →', kbd: true },
-        { label: 'Marcar o quitar la marca de eliminar', value: 'Supr', kbd: true },
-        { label: 'Indicar a una persona o mascota', value: '1 a 9', kbd: true },
-        { label: 'Cerrar un cuadro de diálogo', value: 'Esc', kbd: true },
-      ],
-      note: 'Los números siguen el orden de «Personas» y luego «Mascotas» en el panel de detalles.',
-      confirmLabel: 'Cerrar',
-    })
-
-  // Eliminar es en dos pasos: primero se marcan las fotos (no se borra nada) y después se borran juntas
-  const toDelete = useMemo(() => new Set(library.toDelete), [library.toDelete])
-
-  const toggleDeleteMark = () => {
-    if (current && selected.key !== LOOSE && !isServerPath(library, current.id)) {
-      setLibrary((l) => toggleDelete(l, current.id))
-    }
-  }
-
-  // Manda las fotos marcadas a la Papelera. Si están en una carpeta de iCloud, también se eliminan de allí.
-  const deleteMarked = async () => {
-    if (sending || !library.toDelete.length) return
-    const files = [...library.toDelete]
-    const ok = await dialogs.confirm({
-      title: files.length === 1 ? '¿Eliminar la foto marcada?' : `¿Eliminar las ${files.length.toLocaleString('es')} fotos marcadas?`,
-      body: 'Irán a la Papelera de reciclaje. Si están en una carpeta de iCloud, también se eliminarán de iCloud.',
-      confirmLabel: 'Eliminar',
-      tone: 'danger',
-    })
-    if (!ok) return
-
-    cancelRef.current = false
-    setSending(true)
-    setProgress({ label: 'Eliminando', done: 0, total: files.length })
-    const done = []
-    let failure = null
-    for (const file of files) {
-      if (cancelRef.current) break
-      try {
-        if ((await api.fileInfo(file)).exists) await api.trashFile(file)
-        done.push(file) // si ya no existía, solo se quita de las listas
-      } catch (err) {
-        failure = cleanError(err)
-        break
-      }
-      setProgress({ label: 'Eliminando', done: done.length, total: files.length })
-    }
-    if (done.length) removeFromViews(done)
-    setSending(false)
-    setProgress(null)
-
-    if (failure) {
-      dialogs.alert({
-        title: 'No se pudo terminar',
-        body: `Se eliminaron ${done.length.toLocaleString('es')} de ${files.length.toLocaleString('es')} fotos.\n\n${failure}\n\nLas demás siguen marcadas: puedes volver a intentarlo.`,
-      })
-    } else if (cancelRef.current) {
-      setNotice(`Cancelado. Se eliminaron ${plural(done.length, 'foto', 'fotos')}.`)
-    } else {
-      setNotice(`${plural(done.length, 'foto eliminada', 'fotos eliminadas')}.`)
-    }
-  }
-
-  // Fotos de este equipo que están en un álbum de la app o tienen persona o mascota: se envían juntas,
-  // cada una a la carpeta del servidor con el nombre de su álbum
-  const plan = useMemo(() => sendPlan(library), [library])
-
-  const sendAll = async () => {
-    if (sending || !plan.length) return
-    if (!serverRoot) {
-      dialogs.alert({
-        title: 'Falta la carpeta del servidor',
-        body: 'Elígela en el panel de detalles, en la sección «Servidor».',
-      })
-      return
-    }
-    if (catalogRoot.current !== serverRoot) {
-      dialogs.alert({
-        title: 'No hay conexión con el servidor',
-        body: 'Comprueba que esté encendido y vuelve a intentarlo.',
-      })
-      return
-    }
-    const porAlbum = new Map()
-    for (const { album } of plan) porAlbum.set(album, (porAlbum.get(album) ?? 0) + 1)
-    const ok = await dialogs.confirm({
-      title: `¿Enviar ${plural(plan.length, 'foto', 'fotos')} al servidor?`,
-      body: 'Cada foto va al álbum donde la pusiste. Sus datos (personas, mascotas y etiquetas) viajan con ella.',
-      items: [...porAlbum].map(([label, count]) => ({ label, value: count.toLocaleString('es') })),
-      note: 'Las originales irán a la Papelera. Si están en una carpeta de iCloud, también se eliminarán de iCloud.',
-      confirmLabel: 'Enviar',
-    })
-    if (!ok) return
-
-    cancelRef.current = false
-    setSending(true)
-    setProgress({ label: 'Enviando', done: 0, total: plan.length })
-    const sent = []
-    const missing = []
-    let failure = null
-    for (const { file, album } of plan) {
-      if (cancelRef.current) break
-      try {
-        sent.push({ from: file, to: await api.sendToServer(file, serverRoot, album, true) })
-      } catch (err) {
-        if (err.message.includes('SOURCE_MISSING')) missing.push(file) // ya no existe en el disco
-        else {
-          failure = cleanError(err)
-          break
-        }
-      }
-      setProgress({ label: 'Enviando', done: sent.length + missing.length, total: plan.length })
-    }
-    if (sent.length) {
-      setLibrary((l) => moveMeta(l, sent)) // los datos pasan a la ruta nueva, en el servidor
-      setFilesByKey((prev) => {
-        const nuevas = new Set(sent.map(({ to }) => to.replace(/[\\/][^\\/]*$/, '')))
-        return Object.fromEntries(Object.entries(prev).filter(([dir]) => !nuevas.has(dir)))
-      })
-      setServerFolders([])
-      setServerStatus({ root: serverRoot, state: 'scanning' })
-      api.startScan([serverRoot], 'server')
-    }
-    if (sent.length || missing.length) removeFromViews([...sent.map(({ from }) => from), ...missing])
-    setSending(false)
-    setProgress(null)
-
-    const extra = missing.length ? ` ${plural(missing.length, 'ya no existía', 'ya no existían')}.` : ''
-    if (failure) {
-      dialogs.alert({
-        title: 'No se pudo terminar',
-        body: `Se enviaron ${sent.length.toLocaleString('es')} de ${plan.length.toLocaleString('es')} fotos.${extra}\n\n${failure}\n\nLas que faltan siguen en su álbum de la app: puedes volver a enviar.`,
-      })
-    } else if (cancelRef.current) {
-      setNotice(`Cancelado. Se enviaron ${plural(sent.length, 'foto', 'fotos')}.${extra}`)
-    } else {
-      setNotice(`${plural(sent.length, 'foto enviada', 'fotos enviadas')} al servidor.${extra}`)
-    }
-  }
-
-  const cancel = () => {
-    cancelRef.current = true
-    setProgress((p) => p && { ...p, label: 'Cancelando después de la foto actual:' })
-  }
-
-  // Quita fotos que ya no están en el disco de todas las listas
-  const removeFromViews = (files) => {
-    const gone = new Set(files)
-    setFilesByKey((prev) =>
-      Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.filter((i) => !gone.has(i.id))])),
-    )
-    setFolders((prev) => {
-      const removed = {}
-      for (const file of files) {
-        const dir = file.replace(/[\\/][^\\/]*$/, '')
-        removed[dir] = (removed[dir] ?? 0) + 1
-      }
-      return prev
-        .map((f) => (removed[f.path] ? { ...f, count: f.count - removed[f.path] } : f))
-        .filter((f) => f.count > 0)
-    })
-    setLibrary((l) => files.reduce((lib, file) => forgetImage(lib, file), l))
-    setSelected((s) => {
-      if (!s) return s
-      const list = allFiles[s.key] ?? []
-      const open = list[s.index]
-      const kept = list.filter((i) => !gone.has(i.id))
-      if (open && !gone.has(open.id)) {
-        // sigue la misma foto, aunque cambie su posición en la lista
-        return { ...s, index: kept.findIndex((i) => i.id === open.id) }
-      }
-      if (!kept.length) return null
-      const before = list.slice(0, s.index).filter((i) => !gone.has(i.id)).length
-      return { key: s.key, index: Math.min(before, kept.length - 1) }
-    })
+    browser.addFiles(e.dataTransfer.files)
   }
 
   return (
@@ -533,44 +67,60 @@ function App() {
       onDrop={onDrop}
     >
       <Sidebar
-        folders={shownFolders}
-        hiddenFolders={library.hiddenFolders}
-        looseCount={loose.length}
-        albums={albumEntries}
-        tags={tagEntries}
-        people={people}
-        filterIds={activeFilter}
-        filterMode={filterMode}
-        filterEntry={filterEntry}
-        onToggleFilter={toggleFilter}
-        onFilterMode={setFilterMode}
-        serverFolders={serverFolders}
-        serverState={serverState}
-        serverError={serverStatus.error}
-        onRetryServer={retryServer}
-        scanning={scanning}
-        canScan={Boolean(api)}
-        expanded={expanded}
-        filesByKey={allFiles}
-        selected={selected}
-        onToggle={toggleFolder}
-        onHide={discardFolder}
-        onDropImage={dropInAlbum}
-        onRestore={(folder) => setLibrary((l) => restoreFolder(l, folder))}
-        pendingCount={api ? plan.length : 0}
-        toDelete={toDelete}
-        sending={sending}
-        progress={progress}
-        onSendAll={sendAll}
-        onDeleteMarked={deleteMarked}
-        onClearDeleteMarks={() => setLibrary(clearDeleteMarks)}
-        onCancel={cancel}
-        onShowShortcuts={showShortcuts}
-        onPick={(key, index) => setSelected({ key, index })}
-        onStop={stop}
-        onRescan={rescan}
-        onAddFolder={addFolder}
+        pc={{
+          folders: shownFolders,
+          hiddenFolders: library.hiddenFolders,
+          scanning: pc.scanning,
+          canScan: Boolean(api),
+          onStop: pc.stop,
+          onRescan: () => {
+            browser.reset()
+            pc.rescan()
+          },
+          onAddFolder: pc.addFolder,
+          onHide: (entry) => {
+            actions.hideFolder(entry.path)
+            browser.closeIfIn(entry.path)
+          },
+          onRestore: actions.restoreFolder,
+        }}
+        server={{ folders: server.folders, state: server.state, error: server.error, onRetry: server.retry }}
+        people={{
+          list: collections.people,
+          filterIds: collections.filterIds,
+          filterMode: collections.filterMode,
+          entry: collections.filterEntry,
+          onToggle: (tagId) => {
+            collections.toggleFilter(tagId)
+            browser.expand(FILTER)
+          },
+          onMode: collections.setFilterMode,
+        }}
+        collections={{
+          loose: browser.loose.length,
+          albums: collections.albumEntries,
+          tags: collections.tagEntries,
+        }}
+        tree={{
+          expanded: browser.expanded,
+          filesByKey: browser.allFiles,
+          selected,
+          onToggle: browser.toggleFolder,
+          onPick: browser.pick,
+          onDropImage: actions.dropInAlbum,
+        }}
+        ops={{
+          pendingCount: api ? ops.plan.length : 0,
+          toDelete: ops.toDelete,
+          sending: ops.sending,
+          progress: ops.progress,
+          onSendAll: ops.sendAll,
+          onDeleteMarked: ops.deleteMarked,
+          onClearMarks: ops.clearMarks,
+          onCancel: ops.cancel,
+        }}
         onOpenFiles={() => inputRef.current?.click()}
+        onShowShortcuts={() => dialogs.alert(SHORTCUTS_DIALOG)}
       />
       <input
         ref={inputRef}
@@ -579,7 +129,7 @@ function App() {
         multiple
         hidden
         onChange={(e) => {
-          addFiles(e.target.files)
+          browser.addFiles(e.target.files)
           e.target.value = ''
         }}
       />
@@ -589,36 +139,20 @@ function App() {
           <Viewer
             image={current}
             index={selected.index}
-            total={images.length}
-            persistent={canEdit}
-            canMarkDelete={canEdit && !isServerPath(library, current.id)}
-            markedDelete={toDelete.has(current.id)}
-            onToggleDelete={toggleDeleteMark}
-            who={who}
-            sending={sending}
+            total={browser.images.length}
+            persistent={persistent}
+            canMarkDelete={persistent && !isServerPath(library, current.id)}
+            markedDelete={ops.toDelete.has(current.id)}
+            onToggleDelete={() => ops.toggleDeleteMark(current.id)}
+            who={persistent ? peopleOf(library, current.id) : []}
+            sending={ops.sending}
             detailsOpen={detailsOpen}
             onToggleDetails={() => setDetailsOpen((open) => !open)}
-            onPrev={prev}
-            onNext={next}
+            onPrev={browser.prev}
+            onNext={browser.next}
           />
         ) : (
-          <div className="grid h-full place-items-center p-8">
-            <div
-              className={`max-w-md rounded-lg border border-dashed p-10 text-center transition ${
-                dragging ? 'border-acento bg-acento-suave' : 'border-linea'
-              }`}
-            >
-              <Images size={40} aria-hidden strokeWidth={1.25} className="mx-auto text-suave" />
-              <h2 className="mt-4 font-serif text-3xl leading-tight">
-                {api ? 'Elige una foto para empezar' : 'Suelta tus fotos aquí'}
-              </h2>
-              <p className="mt-2 text-suave">
-                {api
-                  ? 'Abre una carpeta o un álbum en la barra lateral, o arrastra fotos a esta ventana.'
-                  : 'También puedes usar «Abrir fotos».'}
-              </p>
-            </div>
-          </div>
+          <EmptyState dragging={dragging} />
         )}
         {notice && (
           <p
@@ -634,24 +168,35 @@ function App() {
       {detailsOpen && (
         <RightPanel
           image={current}
-          canEdit={canEdit}
+          canEdit={persistent}
           library={library}
-          numbered={numbered}
-          albumCheck={albumCheck}
-          onServerFolder={(folder) => setLibrary((l) => ({ ...l, serverFolder: folder.trim().replace(/\//g, '\\') }))}
-          onPickServerFolder={async () => {
-            const [folder] = await api.selectFolders()
-            if (folder) setLibrary((l) => ({ ...l, serverFolder: folder.replace(/\//g, '\\') }))
-          }}
-          onToggleTag={(tagId) => setLibrary((l) => toggleImageTag(l, current.id, tagId))}
-          onAddTag={(name, kind) => setLibrary((l) => addTag(l, name, kind))}
-          onRemoveTag={(tagId) => setLibrary((l) => removeTag(l, tagId))}
-          onToggleAlbum={(albumId) => setLibrary((l) => toggleInAlbum(l, albumId, current.id))}
-          onDropImage={dropInAlbum}
-          onAddAlbum={(name) => setLibrary((l) => addAlbum(l, name))}
-          onRemoveAlbum={(albumId) => setLibrary((l) => removeAlbum(l, albumId))}
+          numbered={collections.numbered}
+          actions={actions}
         />
       )}
+    </div>
+  )
+}
+
+// Lo que se ve cuando no hay ninguna foto abierta
+function EmptyState({ dragging }) {
+  return (
+    <div className="grid h-full place-items-center p-8">
+      <div
+        className={`max-w-md rounded-lg border border-dashed p-10 text-center transition ${
+          dragging ? 'border-acento bg-acento-suave' : 'border-linea'
+        }`}
+      >
+        <Images size={40} aria-hidden strokeWidth={1.25} className="mx-auto text-suave" />
+        <h2 className="mt-4 font-serif text-3xl leading-tight">
+          {api ? 'Elige una foto para empezar' : 'Suelta tus fotos aquí'}
+        </h2>
+        <p className="mt-2 text-suave">
+          {api
+            ? 'Abre una carpeta o un álbum en la barra lateral, o arrastra fotos a esta ventana.'
+            : 'También puedes usar «Abrir fotos».'}
+        </p>
+      </div>
     </div>
   )
 }

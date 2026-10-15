@@ -21,6 +21,8 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import { dropTarget, startImageDrag } from '../dnd'
+import { tagColor } from '../library'
+import Logo from './Logo'
 
 const ICONS = {
   album: Images,
@@ -56,46 +58,24 @@ function TextButton({ onClick, icon: Icon, children }) {
   )
 }
 
-function Sidebar({
-  folders,
-  hiddenFolders,
-  looseCount,
-  albums,
-  tags,
-  people,
-  filterIds,
-  filterMode,
-  filterEntry,
-  onToggleFilter,
-  onFilterMode,
-  serverFolders,
-  serverState,
-  serverError,
-  onRetryServer,
-  scanning,
-  canScan,
-  expanded,
-  filesByKey,
-  selected,
-  onToggle,
-  onHide,
-  onRestore,
-  onDropImage,
-  pendingCount,
-  toDelete,
-  sending,
-  progress,
-  onSendAll,
-  onDeleteMarked,
-  onClearDeleteMarks,
-  onCancel,
-  onShowShortcuts,
-  onPick,
-  onStop,
-  onRescan,
-  onAddFolder,
-  onOpenFiles,
-}) {
+// Las propiedades vienen agrupadas por tema:
+//   pc: carpetas del equipo · server: álbumes del servidor · people: buscar por personas
+//   collections: fotos sueltas, álbumes y etiquetas · tree: qué está abierto y qué foto se ve
+//   ops: enviar y eliminar fotos en lote
+function Sidebar({ pc, server, people: peopleFilter, collections, tree, ops, onOpenFiles, onShowShortcuts }) {
+  const { folders, hiddenFolders, scanning, canScan, onStop, onRescan, onAddFolder, onHide, onRestore } = pc
+  const { folders: serverFolders, state: serverState, error: serverError, onRetry: onRetryServer } = server
+  const {
+    list: people,
+    filterIds,
+    filterMode,
+    entry: filterEntry,
+    onToggle: onToggleFilter,
+    onMode: onFilterMode,
+  } = peopleFilter
+  const { loose: looseCount, albums, tags } = collections
+  const { expanded, filesByKey, selected, onToggle, onPick, onDropImage } = tree
+  const { pendingCount, toDelete, sending, progress, onSendAll, onDeleteMarked, onClearMarks, onCancel } = ops
   const [query, setQuery] = useState('')
   const [showHidden, setShowHidden] = useState(false)
   const [dropKey, setDropKey] = useState(null) // álbum sobre el que está el cursor al arrastrar
@@ -139,7 +119,12 @@ function Sidebar({
               aria-hidden
               className={`shrink-0 text-suave transition-transform ${isOpen ? 'rotate-90' : ''}`}
             />
-            <Icon size={16} aria-hidden className="shrink-0 text-suave" />
+            <Icon
+              size={16}
+              aria-hidden
+              className="shrink-0 text-suave"
+              style={f.color === undefined ? undefined : { color: tagColor(f) }}
+            />
             <span className="min-w-0 flex-1 truncate">{f.name}</span>
             <span className="shrink-0 text-sm text-suave">{n(f.count)}</span>
           </button>
@@ -196,7 +181,10 @@ function Sidebar({
   return (
     <aside className="flex w-88 shrink-0 flex-col border-r border-linea bg-panel">
       <div className="space-y-3 p-4 pb-2">
-        <h1 className="font-serif text-3xl leading-none tracking-tight">Memoir</h1>
+        <h1 className="flex items-center gap-2.5 font-serif text-3xl leading-none tracking-tight">
+          <Logo size={34} />
+          Memoir
+        </h1>
         <div className={`grid gap-2 ${canScan ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {canScan && (
             <button
@@ -249,13 +237,16 @@ function Sidebar({
                     type="button"
                     aria-pressed={on}
                     onClick={() => onToggleFilter(p.id)}
-                    className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm transition ${
+                    style={
                       on
-                        ? 'border-acento bg-acento text-sobre-acento'
-                        : 'border-linea bg-elevado hover:border-acento'
+                        ? { background: tagColor(p), borderColor: tagColor(p), color: 'var(--sobre-tag)' }
+                        : { borderColor: `color-mix(in srgb, ${tagColor(p)} 55%, var(--linea))` }
+                    }
+                    className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-sm transition ${
+                      on ? '' : 'bg-elevado hover:bg-linea/30'
                     }`}
                   >
-                    <Icon size={13} aria-hidden />
+                    <Icon size={13} aria-hidden style={on ? undefined : { color: tagColor(p) }} />
                     {p.name}
                   </button>
                 )
@@ -436,7 +427,7 @@ function Sidebar({
               </button>
               <button
                 type="button"
-                onClick={onClearDeleteMarks}
+                onClick={onClearMarks}
                 className="rounded-md border border-linea px-3 py-2 transition hover:bg-linea/40"
               >
                 Quitar marcas

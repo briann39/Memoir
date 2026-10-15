@@ -25,6 +25,16 @@
   --peligro: #b42318;
   --peligro-suave: #fbe3e0;
   --exito: #17653f;
+  /* Colores de etiquetas, personas y mascotas. Todos con texto blanco encima (contraste 4.5:1 o más) */
+  --sobre-tag: #ffffff;
+  --tag-1: #1d4e89; /* azul */
+  --tag-2: #1f7a4d; /* verde */
+  --tag-3: #8c540c; /* ámbar */
+  --tag-4: #b0245f; /* rosa */
+  --tag-5: #6a3fb5; /* violeta */
+  --tag-6: #0f766e; /* turquesa */
+  --tag-7: #b8420b; /* naranja */
+  --tag-8: #4a5565; /* grafito */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +55,15 @@
     --peligro: #f28b80;
     --peligro-suave: #4a2623;
     --exito: #6fd69c;
+    --sobre-tag: #0e1b2d;
+    --tag-1: #86b4ee;
+    --tag-2: #6fd69c;
+    --tag-3: #e3a64f;
+    --tag-4: #f08fb8;
+    --tag-5: #b79cf0;
+    --tag-6: #5fd3c8;
+    --tag-7: #f4a06b;
+    --tag-8: #aab4c3;
   }
 }
 
@@ -66,6 +85,7 @@
   --color-peligro: var(--peligro);
   --color-peligro-suave: var(--peligro-suave);
   --color-exito: var(--exito);
+  --color-sobre-tag: var(--sobre-tag);
 }
 
 html,

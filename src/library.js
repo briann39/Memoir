@@ -13,15 +13,12 @@ export const EMPTY_LIBRARY = {
 // Álbum al que va una foto que se envía sin estar en ningún álbum de la app
 export const NO_ALBUM = 'Sin álbum'
 
-// Colores de etiquetas (clases completas para que Tailwind las detecte)
-export const TAG_COLORS = [
-  { chip: 'bg-sky-500/15 text-sky-300', active: 'bg-sky-500 text-white', dot: 'bg-sky-400' },
-  { chip: 'bg-emerald-500/15 text-emerald-300', active: 'bg-emerald-500 text-white', dot: 'bg-emerald-400' },
-  { chip: 'bg-amber-500/15 text-amber-300', active: 'bg-amber-500 text-white', dot: 'bg-amber-400' },
-  { chip: 'bg-rose-500/15 text-rose-300', active: 'bg-rose-500 text-white', dot: 'bg-rose-400' },
-  { chip: 'bg-violet-500/15 text-violet-300', active: 'bg-violet-500 text-white', dot: 'bg-violet-400' },
-  { chip: 'bg-orange-500/15 text-orange-300', active: 'bg-orange-500 text-white', dot: 'bg-orange-400' },
-]
+// Colores que se pueden dar a una etiqueta, persona o mascota. Los valores reales (para tema claro y
+// oscuro) están en index.css como --tag-1 … --tag-8.
+export const TAG_COLORS = ['Azul', 'Verde', 'Ámbar', 'Rosa', 'Violeta', 'Turquesa', 'Naranja', 'Grafito']
+
+// El color de una etiqueta como valor de CSS
+export const tagColor = (tag) => `var(--tag-${(tag.color ?? 0) % TAG_COLORS.length + 1})`
 
 const normalize = (lib) => ({
   albums: lib?.albums ?? [],
@@ -152,8 +149,21 @@ export function addTag(lib, name, kind = 'tag') {
   const clean = name.trim()
   const repetida = lib.tags.some((t) => kindOf(t) === kind && t.name.toLowerCase() === clean.toLowerCase())
   if (!clean || repetida) return lib
-  const tag = { id: crypto.randomUUID(), name: clean, kind, color: lib.tags.length % TAG_COLORS.length }
+  // Cada una nace con el color que menos se usa, para que se distingan entre sí
+  const uses = TAG_COLORS.map((_, color) => lib.tags.filter((t) => (t.color ?? 0) % TAG_COLORS.length === color).length)
+  const color = uses.indexOf(Math.min(...uses))
+  const tag = { id: crypto.randomUUID(), name: clean, kind, color }
   return { ...lib, tags: [...lib.tags, tag] }
+}
+
+export function setTagColor(lib, tagId, color) {
+  return { ...lib, tags: lib.tags.map((t) => (t.id === tagId ? { ...t, color } : t)) }
+}
+
+// Las personas y mascotas indicadas en una foto
+export function peopleOf(lib, file) {
+  const ids = lib.imageTags[file] ?? []
+  return lib.tags.filter((t) => kindOf(t) !== 'tag' && ids.includes(t.id))
 }
 
 // Fotos de este equipo listas para enviar: las que están en un álbum de la app o tienen una persona o
@@ -227,6 +237,13 @@ export function addAlbum(lib, name) {
     return lib
   }
   return { ...lib, albums: [...lib.albums, { id: crypto.randomUUID(), name: clean, images: [] }] }
+}
+
+// Por qué un nombre no sirve para un álbum nuevo (los álbumes son carpetas del servidor), o null si sirve
+export function albumProblem(lib, name) {
+  if (!validFolderName(name)) return 'No uses / \\ : * ? " < > | ni empieces o termines con un punto.'
+  if (lib.albums.some((a) => a.name.toLowerCase() === name.toLowerCase())) return 'Ya existe un álbum con ese nombre.'
+  return null
 }
 
 export function removeAlbum(lib, albumId) {

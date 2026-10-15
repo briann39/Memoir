@@ -1,27 +1,10 @@
-import { useState } from 'react'
-import { FolderOpen, PawPrint, Plus, Tag, User, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Check, FolderOpen, Palette, PawPrint, Plus, Tag, User, X } from 'lucide-react'
 import { useDialogs } from '../dialogs-context'
 import { dropTarget } from '../dnd'
-import { kindOf } from '../library'
+import { albumProblem, kindOf, TAG_COLORS, tagColor } from '../library'
 
-// Cada tipo tiene su color: personas en el azul de la app, mascotas en ocre, etiquetas neutras
-const KINDS = {
-  persona: {
-    icon: User,
-    on: 'border-acento bg-acento text-sobre-acento',
-    off: 'border-linea bg-elevado hover:border-acento',
-  },
-  mascota: {
-    icon: PawPrint,
-    on: 'border-mascota bg-mascota text-sobre-acento',
-    off: 'border-linea bg-elevado hover:border-mascota',
-  },
-  tag: {
-    icon: Tag,
-    on: 'border-tinta bg-tinta text-panel',
-    off: 'border-linea bg-elevado hover:border-tinta',
-  },
-}
+const KIND_ICONS = { persona: User, mascota: PawPrint, tag: Tag }
 
 // Campo para crear algo nuevo. check() devuelve el motivo si el nombre no sirve, y se muestra aquí mismo.
 function NewItemForm({ label, placeholder, check, onAdd }) {
@@ -91,10 +74,51 @@ function Section({ icon: Icon, title, hint, children }) {
   )
 }
 
+// Los ocho colores para elegir
+function ColorPicker({ current, name, onPick }) {
+  return (
+    <div
+      data-color-picker
+      role="group"
+      aria-label={`Color de ${name}`}
+      className="absolute left-0 top-full z-20 mt-1 flex gap-1.5 rounded-md border border-linea bg-elevado p-2 shadow-lg"
+    >
+      {TAG_COLORS.map((color, i) => (
+        <button
+          key={color}
+          type="button"
+          title={color}
+          aria-label={color}
+          aria-pressed={i === current}
+          onClick={() => onPick(i)}
+          style={{ background: tagColor({ color: i }) }}
+          className="grid size-6 place-items-center rounded-full text-sobre-tag ring-offset-2 ring-offset-elevado transition hover:scale-110 aria-pressed:ring-2 aria-pressed:ring-tinta"
+        >
+          {i === current && <Check size={14} aria-hidden strokeWidth={3} />}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // Las etiquetas de un tipo (personas, mascotas o etiquetas) que se activan en la foto actual
 function TagSection({ kind, title, hint, empty, label, placeholder, tags, numbered, activeIds, canEdit, ...actions }) {
   const { confirm } = useDialogs()
-  const { icon: Icon, on, off } = KINDS[kind]
+  const [picker, setPicker] = useState(null) // etiqueta cuyo selector de color está abierto
+  const Icon = KIND_ICONS[kind]
+
+  // El selector se cierra con Esc o al hacer clic fuera de él
+  useEffect(() => {
+    if (!picker) return
+    const outside = (e) => !e.target.closest?.('[data-color-picker]') && setPicker(null)
+    const escape = (e) => e.key === 'Escape' && setPicker(null)
+    document.addEventListener('mousedown', outside)
+    window.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('mousedown', outside)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [picker])
 
   const remove = async (tag) => {
     const ok = await confirm({
@@ -113,12 +137,19 @@ function TagSection({ kind, title, hint, empty, label, placeholder, tags, number
         {tags.map((tag) => {
           const active = activeIds.includes(tag.id)
           const key = numbered?.get(tag.id)
+          const color = tagColor(tag)
           return (
             <span
               key={tag.id}
-              className={`group flex items-center rounded-full border transition ${active ? on : off} ${
-                canEdit ? '' : 'opacity-70'
-              }`}
+              data-color-picker={picker === tag.id ? '' : undefined}
+              style={
+                active
+                  ? { background: color, borderColor: color, color: 'var(--sobre-tag)' }
+                  : { borderColor: `color-mix(in srgb, ${color} 55%, var(--linea))` }
+              }
+              className={`group relative flex items-center rounded-full border transition ${
+                active ? '' : 'bg-elevado'
+              } ${canEdit ? '' : 'opacity-70'}`}
             >
               <button
                 type="button"
@@ -128,6 +159,7 @@ function TagSection({ kind, title, hint, empty, label, placeholder, tags, number
                 onClick={() => actions.onToggle(tag.id)}
                 className="flex items-center gap-1.5 rounded-full py-1 pl-3 pr-2 disabled:cursor-default"
               >
+                {!active && <span aria-hidden style={{ background: color }} className="size-2.5 rounded-full" />}
                 {tag.name}
                 {key && (
                   <kbd
@@ -140,12 +172,32 @@ function TagSection({ kind, title, hint, empty, label, placeholder, tags, number
               </button>
               <button
                 type="button"
+                aria-label={`Cambiar el color de ${tag.name}`}
+                title="Cambiar el color"
+                aria-expanded={picker === tag.id}
+                onClick={() => setPicker((open) => (open === tag.id ? null : tag.id))}
+                className="rounded-full p-0.5 opacity-0 transition hover:bg-black/15 focus:opacity-100 group-hover:opacity-100"
+              >
+                <Palette size={13} aria-hidden />
+              </button>
+              <button
+                type="button"
                 aria-label={`Eliminar ${tag.name}`}
                 onClick={() => remove(tag)}
                 className="mr-1.5 rounded-full p-0.5 opacity-0 transition hover:bg-black/15 focus:opacity-100 group-hover:opacity-100"
               >
                 <X size={13} aria-hidden />
               </button>
+              {picker === tag.id && (
+                <ColorPicker
+                  current={(tag.color ?? 0) % TAG_COLORS.length}
+                  name={tag.name}
+                  onPick={(i) => {
+                    actions.onColor(tag.id, i)
+                    setPicker(null)
+                  }}
+                />
+              )}
             </span>
           )
         })}
@@ -162,27 +214,26 @@ function TagSection({ kind, title, hint, empty, label, placeholder, tags, number
   )
 }
 
-function RightPanel({
-  image,
-  canEdit,
-  library,
-  numbered,
-  onServerFolder,
-  onPickServerFolder,
-  onToggleTag,
-  onAddTag,
-  onRemoveTag,
-  onToggleAlbum,
-  onAddAlbum,
-  onRemoveAlbum,
-  onDropImage,
-  albumCheck,
-}) {
+// actions: lo que se puede hacer con la biblioteca (ver useLibraryActions)
+function RightPanel({ image, canEdit, library, numbered, actions }) {
+  const {
+    toggleTag: onToggleTag,
+    setColor: onSetColor,
+    addTag: onAddTag,
+    removeTag: onRemoveTag,
+    toggleAlbum: onToggleAlbum,
+    addAlbum: onAddAlbum,
+    removeAlbum: onRemoveAlbum,
+    dropInAlbum: onDropImage,
+    setServerFolder: onServerFolder,
+    pickServerFolder: onPickServerFolder,
+  } = actions
+  const albumCheck = (name) => albumProblem(library, name)
   const { confirm } = useDialogs()
   const [dropId, setDropId] = useState(null) // álbum sobre el que está el cursor al arrastrar
   const activeIds = (canEdit && library.imageTags[image.id]) || []
   const byKind = (kind) => library.tags.filter((t) => kindOf(t) === kind)
-  const shared = { activeIds, canEdit, numbered, onToggle: onToggleTag, onRemove: onRemoveTag }
+  const shared = { activeIds, canEdit, numbered, onToggle: onToggleTag, onRemove: onRemoveTag, onColor: onSetColor }
 
   const removeAlbum = async (album) => {
     const ok = await confirm({

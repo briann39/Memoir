@@ -1,12 +1,32 @@
 import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight, Cloud, LoaderCircle, PanelRight, Trash2 } from 'lucide-react'
 import { startImageDrag } from '../dnd'
+import { tagColor } from '../library'
 
 const names = new Intl.ListFormat('es', { style: 'long', type: 'conjunction' })
 
 // La copia: la foto sobre un paspartú, como en un álbum
 const PRINT =
   'bg-marco p-3 shadow-[0_1px_2px_rgb(0_0_0/0.12),0_12px_32px_rgb(0_0_0/0.14)] rounded-[3px]'
+
+// El pie de foto: quién sale, cada nombre con el color que tiene en la app
+function Caption({ who }) {
+  let i = 0
+  return names.formatToParts(who.map((w) => w.name)).map((part, k) =>
+    part.type === 'literal' ? (
+      <span key={k}>{part.value}</span>
+    ) : (
+      <span key={k} className="whitespace-nowrap">
+        <span
+          aria-hidden
+          style={{ background: tagColor(who[i++]) }}
+          className="mr-1.5 inline-block size-2.5 rounded-full align-middle"
+        />
+        {part.value}
+      </span>
+    ),
+  )
+}
 
 function NavButton({ side, label, onClick }) {
   const Icon = side === 'left' ? ChevronLeft : ChevronRight
@@ -191,7 +211,9 @@ function Viewer({
               </div>
               <figcaption className="text-center">
                 {who.length > 0 ? (
-                  <p className="font-serif text-2xl leading-tight">{names.format(who.map((w) => w.name))}</p>
+                  <p className="font-serif text-2xl leading-tight">
+                    <Caption who={who} />
+                  </p>
                 ) : (
                   <p className="font-serif text-xl italic text-suave">
                     {persistent ? 'Nadie indicado todavía' : image.name}

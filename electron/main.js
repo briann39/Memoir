@@ -160,6 +160,7 @@ function createWindow() {
     minWidth: 1100,
     minHeight: 600,
     title: 'Memoir',
+    icon: path.join(__dirname, '../build/icon.png'),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#262a31' : '#e4e8ed', // el color de la mesa, sin parpadeo
     autoHideMenuBar: true,
     webPreferences: {
