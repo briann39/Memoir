@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { dropTarget } from '../dnd'
-import { TAG_COLORS } from '../library'
+import { kindOf, TAG_COLORS } from '../library'
 
 function NewItemForm({ placeholder, onAdd }) {
   const [value, setValue] = useState('')
@@ -32,6 +32,52 @@ function NewItemForm({ placeholder, onAdd }) {
   )
 }
 
+// Una lista de etiquetas de un tipo (personas, mascotas o etiquetas normales) que se activan en la foto actual
+function TagSection({ title, hint, empty, placeholder, tags, activeIds, canEdit, onToggle, onAdd, onRemove }) {
+  return (
+    <section className="space-y-3">
+      <div>
+        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
+        {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {tags.length === 0 && <p className="text-sm text-slate-500">{empty}</p>}
+        {tags.map((tag) => {
+          const color = TAG_COLORS[tag.color % TAG_COLORS.length]
+          const on = activeIds.includes(tag.id)
+          return (
+            <span
+              key={tag.id}
+              className={`group flex items-center rounded-full text-sm ${on ? color.active : color.chip}`}
+            >
+              <button
+                type="button"
+                disabled={!canEdit}
+                aria-pressed={on}
+                onClick={() => onToggle(tag.id)}
+                className="rounded-full py-1 pl-3 pr-2 disabled:cursor-default"
+              >
+                {tag.name}
+              </button>
+              <button
+                type="button"
+                aria-label={`Eliminar ${tag.name}`}
+                onClick={() => {
+                  if (window.confirm(`¿Eliminar "${tag.name}" de todas las fotos?`)) onRemove(tag.id)
+                }}
+                className="pr-2 text-xs opacity-0 transition group-hover:opacity-70 hover:!opacity-100"
+              >
+                ✕
+              </button>
+            </span>
+          )
+        })}
+      </div>
+      <NewItemForm placeholder={placeholder} onAdd={onAdd} />
+    </section>
+  )
+}
+
 function RightPanel({
   image,
   canEdit,
@@ -47,14 +93,17 @@ function RightPanel({
   onDropImage,
 }) {
   const [dropId, setDropId] = useState(null) // álbum sobre el que está el cursor al arrastrar
-  const imageTags = (canEdit && library.imageTags[image.id]) || []
+  const activeIds = (canEdit && library.imageTags[image.id]) || []
+  const byKind = (kind) => library.tags.filter((t) => kindOf(t) === kind)
+
+  const shared = { activeIds, canEdit, onToggle: onToggleTag, onRemove: onRemoveTag }
 
   return (
     <aside className="flex w-72 shrink-0 flex-col gap-6 overflow-y-auto border-l border-slate-800 bg-slate-950 p-4">
       <div className="min-w-0">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Foto</h2>
         <p className="mt-1 truncate text-sm">
-          {image ? image.name : 'Elige una foto para etiquetarla o guardarla en un álbum'}
+          {image ? image.name : 'Elige una foto para indicar quién sale en ella'}
         </p>
         {image && !canEdit && (
           <p className="mt-1 text-xs text-amber-400">
@@ -63,47 +112,35 @@ function RightPanel({
         )}
       </div>
 
-      <section className="space-y-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Etiquetas</h2>
-        <div className="flex flex-wrap gap-2">
-          {library.tags.length === 0 && (
-            <p className="text-sm text-slate-500">Crea etiquetas como Juegos, Trabajo o Yo.</p>
-          )}
-          {library.tags.map((tag) => {
-            const color = TAG_COLORS[tag.color % TAG_COLORS.length]
-            const on = imageTags.includes(tag.id)
-            return (
-              <span
-                key={tag.id}
-                className={`group flex items-center rounded-full text-sm ${on ? color.active : color.chip}`}
-              >
-                <button
-                  type="button"
-                  disabled={!canEdit}
-                  aria-pressed={on}
-                  onClick={() => onToggleTag(tag.id)}
-                  className="rounded-full py-1 pl-3 pr-2 disabled:cursor-default"
-                >
-                  {tag.name}
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Eliminar etiqueta ${tag.name}`}
-                  onClick={() => {
-                    if (window.confirm(`¿Eliminar la etiqueta "${tag.name}" de todas las fotos?`)) {
-                      onRemoveTag(tag.id)
-                    }
-                  }}
-                  className="pr-2 text-xs opacity-0 transition group-hover:opacity-70 hover:!opacity-100"
-                >
-                  ✕
-                </button>
-              </span>
-            )
-          })}
-        </div>
-        <NewItemForm placeholder="Nueva etiqueta" onAdd={onAddTag} />
-      </section>
+      <TagSection
+        {...shared}
+        title="👤 Personas"
+        hint="Quién sale en la foto. Al enviar, se guarda en la carpeta Personas de esa persona."
+        empty="Crea a las personas, por ejemplo Mamá o Brian."
+        placeholder="Nueva persona"
+        tags={byKind('persona')}
+        onAdd={(name) => onAddTag(name, 'persona')}
+      />
+
+      <TagSection
+        {...shared}
+        title="🐾 Mascotas"
+        hint="Al enviar, se guarda en la carpeta Mascotas de esa mascota. Si salen varias, se copia a cada una."
+        empty="Crea a tus mascotas, por ejemplo Luna."
+        placeholder="Nueva mascota"
+        tags={byKind('mascota')}
+        onAdd={(name) => onAddTag(name, 'mascota')}
+      />
+
+      <TagSection
+        {...shared}
+        title="Etiquetas"
+        hint="Para organizar: Juegos, Trabajo… No se envían a ningún lado."
+        empty="Crea etiquetas como Juegos o Trabajo."
+        placeholder="Nueva etiqueta"
+        tags={byKind('tag')}
+        onAdd={(name) => onAddTag(name, 'tag')}
+      />
 
       <section className="space-y-3">
         <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Álbumes</h2>
@@ -170,9 +207,7 @@ function RightPanel({
             Elegir carpeta…
           </button>
           <p className="text-xs text-slate-500">
-            Carpeta de red o unidad donde "Enviar al servidor" guarda las fotos. Al enviar eliges la
-            carpeta de la persona o el animal, o creas una nueva. La original va a la Papelera una
-            vez copiada.
+            Carpeta de red o unidad donde se guardan las fotos al pulsar "Enviar" en la barra lateral.
           </p>
         </section>
       )}

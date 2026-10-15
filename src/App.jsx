@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cleanError } from './errors'
 import RightPanel from './components/RightPanel'
-import SendDialog from './components/SendDialog'
 import Sidebar from './components/Sidebar'
 import Viewer from './components/Viewer'
 import {
@@ -10,7 +9,8 @@ import {
   addToAlbum,
   EMPTY_LIBRARY,
   forgetImage,
-  targetKey,
+  kindOf,
+  sendPlan,
   hideFolder,
   imageFromPath,
   loadLibrary,
@@ -34,9 +34,7 @@ function App() {
   const [selected, setSelected] = useState(null) // { key, index }
   const [dragging, setDragging] = useState(false)
   const [sending, setSending] = useState(false)
-  const [sendJob, setSendJob] = useState(null) // fotos que esperan que se elija la carpeta del servidor
   const [progress, setProgress] = useState(null) // { done, total } mientras se envía
-  const [marked, setMarked] = useState(() => new Set()) // fotos marcadas para enviar
   const [notice, setNotice] = useState(null)
   const [library, setLibrary] = useState(EMPTY_LIBRARY)
   const libraryLoaded = useRef(false)
@@ -110,7 +108,7 @@ function App() {
         name: t.name,
         count: virtualFiles[`tag:${t.id}`].length,
         virtual: true,
-        icon: '🏷️',
+        icon: { persona: '👤', mascota: '🐾', tag: '🏷️' }[kindOf(t)],
       })),
     [library.tags, virtualFiles],
   )
@@ -136,7 +134,6 @@ function App() {
     setExpanded(new Set())
     setFilesByKey({})
     setSelected(null)
-    setMarked(new Set())
     startScan()
   }
 
@@ -224,72 +221,55 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
     removeFromViews([file])
   }
 
-  const toggleMark = (file) =>
-    setMarked((prev) => {
-      const next = new Set(prev)
-      if (next.has(file)) next.delete(file)
-      else next.add(file)
-      return next
-    })
+  // Fotos que ya tienen una persona o mascota: se envían juntas, cada una a su carpeta del servidor
+  const plan = useMemo(() => sendPlan(library), [library])
 
-  const markAll = (files, on) =>
-    setMarked((prev) => {
-      const next = new Set(prev)
-      for (const img of files) {
-        if (on) next.add(img.id)
-        else next.delete(img.id)
-      }
-      return next
-    })
-
-  // Abre el selector de carpeta del servidor (persona o mascota) para esas fotos
-  const startSend = (files) => {
-    if (!files.length || sending) return
+  const sendAll = async () => {
+    if (sending || !plan.length) return
     if (!library.serverFolder) {
       window.alert('Primero elige la carpeta del servidor en el panel derecho.')
       return
     }
-    setSendJob(files)
-  }
-
-  const sendCurrent = () => {
-    if (current && selected.key !== LOOSE) startSend([current.id])
-  }
-
-  // Envía una por una las fotos a la carpeta elegida y las mueve: salen de las listas igual que al eliminar
-  const sendToServer = async (kind, name) => {
-    const files = sendJob
-    setSendJob(null)
-    setSending(true)
-    setProgress({ done: 0, total: files.length })
-    const sent = []
-    let failure = null
-    for (const file of files) {
-      try {
-        await api.sendToServer(file, library.serverFolder, kind, name, true)
-        sent.push(file)
-        setProgress({ done: sent.length, total: files.length })
-      } catch (err) {
-        failure = cleanError(err)
-        break
+    const porDestino = new Map()
+    for (const { targets } of plan) {
+      for (const { kind, name } of targets) {
+        const destino = `${kind === 'personas' ? '👤' : '🐾'} ${name}`
+        porDestino.set(destino, (porDestino.get(destino) ?? 0) + 1)
       }
     }
-    if (sent.length) {
-      setLibrary((l) => ({ ...l, lastSubfolder: targetKey(kind, name) }))
-      removeFromViews(sent)
+    const resumen = [...porDestino].map(([destino, n]) => `• ${destino}: ${n}`).join('\n')
+    const aviso = `Se enviarán ${plan.length} fotos al servidor:\n\n${resumen}\n\nLas originales irán a la Papelera. Si están en una carpeta de iCloud, también se eliminarán de iCloud.`
+    if (!window.confirm(aviso)) return
+
+    setSending(true)
+    setProgress({ done: 0, total: plan.length })
+    const sent = []
+    const missing = []
+    let failure = null
+    for (const { file, targets } of plan) {
+      try {
+        await api.sendToServer(file, library.serverFolder, targets, true)
+        sent.push(file)
+      } catch (err) {
+        if (err.message.includes('SOURCE_MISSING')) missing.push(file) // ya no existe en el disco
+        else {
+          failure = cleanError(err)
+          break
+        }
+      }
+      setProgress({ done: sent.length + missing.length, total: plan.length })
     }
+    if (sent.length || missing.length) removeFromViews([...sent, ...missing])
     setSending(false)
     setProgress(null)
 
-    const destino = name || 'la raíz del servidor'
+    const extra = missing.length ? ` (${missing.length} ya no existían)` : ''
     if (failure) {
       window.alert(
-        sent.length ? `Se enviaron ${sent.length} de ${files.length} fotos a ${destino}.\n\n${failure}` : failure,
+        `Se enviaron ${sent.length} de ${plan.length} fotos.${extra}\n\n${failure}\n\nLas que faltan siguen con su persona o mascota: puedes volver a pulsar Enviar.`,
       )
-    } else if (sent.length === 1) {
-      setNotice(`"${sent[0].split(/[\\/]/).pop()}" enviada a ${destino}`)
     } else {
-      setNotice(`${sent.length} fotos enviadas a ${destino}`)
+      setNotice(`${sent.length} ${sent.length === 1 ? 'foto enviada' : 'fotos enviadas'} al servidor${extra}`)
     }
   }
 
@@ -310,7 +290,6 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
         .filter((f) => f.count > 0)
     })
     setLibrary((l) => files.reduce((lib, file) => forgetImage(lib, file), l))
-    setMarked((prev) => new Set([...prev].filter((file) => !gone.has(file))))
     setSelected((s) => {
       if (!s) return s
       const list = allFiles[s.key] ?? []
@@ -327,6 +306,13 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
   }
 
   const canEdit = Boolean(current) && selected.key !== LOOSE
+
+  // Personas y mascotas indicadas en la foto que se está viendo
+  const who = canEdit
+    ? library.tags
+        .filter((t) => kindOf(t) !== 'tag' && (library.imageTags[current.id] ?? []).includes(t.id))
+        .map((t) => ({ id: t.id, name: t.name, kind: kindOf(t) }))
+    : []
 
   return (
     <div
@@ -355,14 +341,10 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
         onHide={discardFolder}
         onDropImage={dropInAlbum}
         onRestore={(folder) => setLibrary((l) => restoreFolder(l, folder))}
-        marked={marked}
-        markedCount={marked.size}
+        pendingCount={api ? plan.length : 0}
         sending={sending}
         progress={progress}
-        onToggleMark={toggleMark}
-        onMarkAll={markAll}
-        onSendMarked={() => startSend([...marked])}
-        onClearMarks={() => setMarked(new Set())}
+        onSendAll={sendAll}
         onPick={(key, index) => setSelected({ key, index })}
         onStop={stop}
         onRescan={rescan}
@@ -389,9 +371,7 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
             total={images.length}
             persistent={canEdit}
             onDelete={deleteImage}
-            marked={marked.has(current.id)}
-            onToggleMark={() => toggleMark(current.id)}
-            onSend={api ? sendCurrent : undefined}
+            who={who}
             sending={sending}
             onPrev={prev}
             onNext={next}
@@ -429,7 +409,7 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
           if (folder) setLibrary((l) => ({ ...l, serverFolder: folder }))
         }}
         onToggleTag={(tagId) => setLibrary((l) => toggleImageTag(l, current.id, tagId))}
-        onAddTag={(name) => setLibrary((l) => addTag(l, name))}
+        onAddTag={(name, kind) => setLibrary((l) => addTag(l, name, kind))}
         onRemoveTag={(tagId) => setLibrary((l) => removeTag(l, tagId))}
         onToggleAlbum={(albumId) => setLibrary((l) => toggleInAlbum(l, albumId, current.id))}
         onDropImage={dropInAlbum}
@@ -437,15 +417,6 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
         onRemoveAlbum={(albumId) => setLibrary((l) => removeAlbum(l, albumId))}
       />
 
-      {sendJob && (
-        <SendDialog
-          serverFolder={library.serverFolder}
-          lastUsed={library.lastSubfolder}
-          count={sendJob.length}
-          onPick={sendToServer}
-          onClose={() => setSendJob(null)}
-        />
-      )}
     </div>
   )
 }

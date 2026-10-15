@@ -228,46 +228,46 @@ app.whenReady().then(() => {
     }
   })
 
-  // Carpetas que ya existen en el servidor: una por persona y una por mascota
-  ipcMain.handle('server-folders', async (_event, serverDir) => {
-    const root = await checkServerDir(serverDir)
-    const dirsIn = async (dir) => {
-      const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
-      return entries
-        .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !e.name.startsWith('$'))
-        .map((e) => e.name)
-        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    }
-    const reservadas = Object.values(KIND_DIRS).map((d) => d.toLowerCase())
-    return {
-      personas: await dirsIn(path.join(root, KIND_DIRS.personas)),
-      mascotas: await dirsIn(path.join(root, KIND_DIRS.mascotas)),
-      otras: (await dirsIn(root)).filter((n) => !reservadas.includes(n.toLowerCase())),
-    }
-  })
-
-  // Copia la foto a la carpeta del servidor (una ruta de red o una unidad) y, si se pide, la mueve:
-  // la original va a la Papelera solo cuando la copia quedó completa.
-  // kind: 'personas' | 'mascotas' | 'otras' | '' (raíz). name: la carpeta de esa persona o mascota.
-  // Se crea si no existe.
-  ipcMain.handle('send-to-server', async (_event, file, serverDir, kind, name, move) => {
+  // Copia la foto al servidor (una ruta de red o una unidad), una vez por cada persona o mascota
+  // indicada en targets ([{ kind: 'personas' | 'mascotas', name }]), y si se pide la mueve:
+  // la original va a la Papelera solo cuando todas las copias quedaron completas.
+  // Si algo falla se borran las copias de esta llamada, para no dejar duplicados al reintentar.
+  ipcMain.handle('send-to-server', async (_event, file, serverDir, targets, move) => {
     if (!path.isAbsolute(file) || !isImage(file)) throw new Error('Ruta no válida')
-    if (kind && kind !== 'otras' && !KIND_DIRS[kind]) throw new Error('Tipo de carpeta no válido')
-    const folder = safeFolderName(name)
-    if (kind && !folder) throw new Error('Falta el nombre de la carpeta')
-    const destDir = path.join(await checkServerDir(serverDir), KIND_DIRS[kind] ?? '', folder)
-    await fs.mkdir(destDir, { recursive: true })
+    if (!Array.isArray(targets) || targets.length === 0 || targets.length > 20) {
+      throw new Error('Falta la persona o mascota de la foto')
+    }
+    const root = await checkServerDir(serverDir)
+    const destDirs = new Set(
+      targets.map(({ kind, name }) => {
+        if (!KIND_DIRS[kind]) throw new Error('Tipo de carpeta no válido')
+        const folder = safeFolderName(name)
+        if (!folder) throw new Error('Falta el nombre de la carpeta')
+        return path.join(root, KIND_DIRS[kind], folder)
+      }),
+    )
+    const origen = await fs.stat(file).catch(() => null)
+    if (!origen) throw new Error('SOURCE_MISSING')
+
     const ext = path.extname(file)
     const base = path.basename(file, ext)
-    let target = path.join(destDir, base + ext)
-    for (let n = 1; await fs.stat(target).then(() => true, () => false); n++) {
-      target = path.join(destDir, `${base} (${n})${ext}`) // no pisa fotos que ya estén en el servidor
-    }
-    await fs.copyFile(file, target, fsConstants.COPYFILE_EXCL)
-    const [origen, copia] = await Promise.all([fs.stat(file), fs.stat(target)])
-    if (origen.size !== copia.size) {
-      await fs.rm(target, { force: true })
-      throw new Error('La copia no coincide con la original. No se movió nada.')
+    const copies = []
+    try {
+      for (const destDir of destDirs) {
+        await fs.mkdir(destDir, { recursive: true })
+        let target = path.join(destDir, base + ext)
+        for (let n = 1; await fs.stat(target).then(() => true, () => false); n++) {
+          target = path.join(destDir, `${base} (${n})${ext}`) // no pisa fotos que ya estén en el servidor
+        }
+        await fs.copyFile(file, target, fsConstants.COPYFILE_EXCL)
+        copies.push(target)
+        if ((await fs.stat(target)).size !== origen.size) {
+          throw new Error('La copia no coincide con la original. No se movió nada.')
+        }
+      }
+    } catch (err) {
+      await Promise.all(copies.map((c) => fs.rm(c, { force: true })))
+      throw err
     }
     if (move) {
       try {
@@ -276,7 +276,7 @@ app.whenReady().then(() => {
         throw new Error('La foto se copió al servidor, pero no se pudo enviar la original a la Papelera.')
       }
     }
-    return target
+    return copies
   })
 
   // Manda la foto a la Papelera de reciclaje. En una carpeta sincronizada, la nube también la elimina.

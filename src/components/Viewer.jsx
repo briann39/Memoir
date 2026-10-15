@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { startImageDrag } from '../dnd'
 
 // persistent: la foto es un archivo del disco (no una imagen suelta)
-function Viewer({ image, index, total, persistent, sending, marked, onPrev, onNext, onDelete, onSend, onToggleMark }) {
+function Viewer({ image, index, total, persistent, sending, who, onPrev, onNext, onDelete }) {
   const api = window.electronAPI
   const needsCheck = persistent && Boolean(api)
   const [info, setInfo] = useState(null) // { id, exists, cloud }
@@ -15,14 +15,10 @@ function Viewer({ image, index, total, persistent, sending, marked, onPrev, onNe
       if (e.key === 'ArrowLeft') onPrev()
       if (e.key === 'ArrowRight') onNext()
       if (e.key === 'Delete' && persistent) onDelete()
-      if (e.key === ' ' && persistent && !(e.target instanceof HTMLButtonElement)) {
-        e.preventDefault()
-        onToggleMark()
-      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onPrev, onNext, onDelete, onToggleMark, persistent])
+  }, [onPrev, onNext, onDelete, persistent])
 
   // Antes de cargar la imagen se mira si está solo en la nube: abrirla la descargaría
   useEffect(() => {
@@ -57,38 +53,21 @@ function Viewer({ image, index, total, persistent, sending, marked, onPrev, onNe
   return (
     <div className="relative flex h-full flex-col">
       <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-6 py-3">
-        <p className="min-w-0 truncate text-sm font-medium">{image.name}</p>
+        <div className="flex min-w-0 items-center gap-3">
+          <p className="min-w-0 truncate text-sm font-medium">{image.name}</p>
+          {who.map((w) => (
+            <span
+              key={w.id}
+              className="shrink-0 rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-300"
+            >
+              {w.kind === 'persona' ? '👤' : '🐾'} {w.name}
+            </span>
+          ))}
+        </div>
         <div className="flex shrink-0 items-center gap-4">
           <p className="text-sm text-slate-400">
             {index + 1} / {total}
           </p>
-          {persistent && (
-            <label
-              title="Marcar para enviar (barra espaciadora)"
-              className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-1 text-sm transition ${
-                marked ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={marked}
-                onChange={onToggleMark}
-                className="accent-sky-500"
-              />
-              Marcar
-            </label>
-          )}
-          {persistent && onSend && (
-            <button
-              type="button"
-              title="Mover al servidor"
-              disabled={sending}
-              onClick={onSend}
-              className="rounded-lg bg-sky-500/15 px-3 py-1 text-sm text-sky-300 transition hover:bg-sky-500 hover:text-white disabled:opacity-50"
-            >
-              {sending ? 'Enviando…' : '📤 Enviar al servidor'}
-            </button>
-          )}
           {persistent && (
             <button
               type="button"

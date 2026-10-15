@@ -8,9 +8,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveLibrary: (library) => ipcRenderer.invoke('library-save', library),
   fileInfo: (file) => ipcRenderer.invoke('file-info', file),
   thumbnail: (file, size) => ipcRenderer.invoke('thumbnail', file, size),
-  serverFolders: (serverDir) => ipcRenderer.invoke('server-folders', serverDir),
-  sendToServer: (file, serverDir, kind, name, move) =>
-    ipcRenderer.invoke('send-to-server', file, serverDir, kind, name, move),
+  sendToServer: (file, serverDir, targets, move) =>
+    ipcRenderer.invoke('send-to-server', file, serverDir, targets, move),
   trashFile: (file) => ipcRenderer.invoke('trash-file', file),
   readFolder: (folder) => ipcRenderer.invoke('read-folder', folder),
   onScanBatch: (cb) => {

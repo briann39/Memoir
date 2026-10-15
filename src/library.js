@@ -1,6 +1,6 @@
 // Biblioteca del usuario: álbumes propios y etiquetas. Las fotos se identifican por su ruta en disco.
 
-export const EMPTY_LIBRARY = { albums: [], tags: [], imageTags: {}, hiddenFolders: [], serverFolder: '', lastSubfolder: '' }
+export const EMPTY_LIBRARY = { albums: [], tags: [], imageTags: {}, hiddenFolders: [], serverFolder: '' }
 
 // Colores de etiquetas (clases completas para que Tailwind las detecte)
 export const TAG_COLORS = [
@@ -18,7 +18,6 @@ const normalize = (lib) => ({
   imageTags: lib?.imageTags ?? {},
   hiddenFolders: lib?.hiddenFolders ?? [],
   serverFolder: lib?.serverFolder ?? '',
-  lastSubfolder: lib?.lastSubfolder ?? '',
 })
 
 // En Electron se guarda en un archivo de la app; en el navegador, en localStorage
@@ -40,9 +39,6 @@ export function saveLibrary(lib) {
   }
 }
 
-// Clave de un destino en el servidor; sirve para recordar el último usado
-export const targetKey = (kind, name) => `${kind}/${name}`
-
 export function imageFromPath(file) {
   return {
     id: file,
@@ -53,11 +49,29 @@ export function imageFromPath(file) {
 
 const toggle = (list, item) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item])
 
-export function addTag(lib, name) {
+// Una etiqueta es normal ('tag'), una persona o una mascota. Las dos últimas son los destinos del servidor.
+export const kindOf = (tag) => tag.kind ?? 'tag'
+
+export function addTag(lib, name, kind = 'tag') {
   const clean = name.trim()
-  if (!clean || lib.tags.some((t) => t.name.toLowerCase() === clean.toLowerCase())) return lib
-  const tag = { id: crypto.randomUUID(), name: clean, color: lib.tags.length % TAG_COLORS.length }
+  const repetida = lib.tags.some((t) => kindOf(t) === kind && t.name.toLowerCase() === clean.toLowerCase())
+  if (!clean || repetida) return lib
+  const tag = { id: crypto.randomUUID(), name: clean, kind, color: lib.tags.length % TAG_COLORS.length }
   return { ...lib, tags: [...lib.tags, tag] }
+}
+
+// Fotos que tienen una persona o mascota asignada y a qué carpetas del servidor irían
+export function sendPlan(lib) {
+  const tags = new Map(lib.tags.map((t) => [t.id, t]))
+  const plan = []
+  for (const [file, ids] of Object.entries(lib.imageTags)) {
+    const targets = ids
+      .map((id) => tags.get(id))
+      .filter((t) => t && (kindOf(t) === 'persona' || kindOf(t) === 'mascota'))
+      .map((t) => ({ kind: kindOf(t) === 'persona' ? 'personas' : 'mascotas', name: t.name }))
+    if (targets.length) plan.push({ file, targets })
+  }
+  return plan.sort((a, b) => a.file.localeCompare(b.file))
 }
 
 export function removeTag(lib, tagId) {
