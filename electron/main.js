@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, net, nativeImage, protocol, shell } from 'electron'
+import { constants as fsConstants } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -202,6 +203,38 @@ app.whenReady().then(() => {
     } catch {
       return null
     }
+  })
+
+  // Copia la foto a la carpeta del servidor (una ruta de red o una unidad) y, si se pide, la mueve:
+  // la original va a la Papelera solo cuando la copia quedó completa.
+  ipcMain.handle('send-to-server', async (_event, file, destDir, move) => {
+    if (!path.isAbsolute(file) || !isImage(file) || !path.isAbsolute(destDir)) {
+      throw new Error('Ruta no válida')
+    }
+    const dest = await fs.stat(destDir).catch(() => null)
+    if (!dest?.isDirectory()) {
+      throw new Error('No se puede acceder a la carpeta del servidor. ¿Está encendido y conectado?')
+    }
+    const ext = path.extname(file)
+    const base = path.basename(file, ext)
+    let target = path.join(destDir, base + ext)
+    for (let n = 1; await fs.stat(target).then(() => true, () => false); n++) {
+      target = path.join(destDir, `${base} (${n})${ext}`) // no pisa fotos que ya estén en el servidor
+    }
+    await fs.copyFile(file, target, fsConstants.COPYFILE_EXCL)
+    const [origen, copia] = await Promise.all([fs.stat(file), fs.stat(target)])
+    if (origen.size !== copia.size) {
+      await fs.rm(target, { force: true })
+      throw new Error('La copia no coincide con la original. No se movió nada.')
+    }
+    if (move) {
+      try {
+        await shell.trashItem(file)
+      } catch {
+        throw new Error('La foto se copió al servidor, pero no se pudo enviar la original a la Papelera.')
+      }
+    }
+    return target
   })
 
   // Manda la foto a la Papelera de reciclaje. En una carpeta sincronizada, la nube también la elimina.

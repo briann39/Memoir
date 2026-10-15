@@ -1,6 +1,6 @@
 // Biblioteca del usuario: álbumes propios y etiquetas. Las fotos se identifican por su ruta en disco.
 
-export const EMPTY_LIBRARY = { albums: [], tags: [], imageTags: {}, hiddenFolders: [] }
+export const EMPTY_LIBRARY = { albums: [], tags: [], imageTags: {}, hiddenFolders: [], serverFolder: '' }
 
 // Colores de etiquetas (clases completas para que Tailwind las detecte)
 export const TAG_COLORS = [
@@ -17,6 +17,7 @@ const normalize = (lib) => ({
   tags: lib?.tags ?? [],
   imageTags: lib?.imageTags ?? {},
   hiddenFolders: lib?.hiddenFolders ?? [],
+  serverFolder: lib?.serverFolder ?? '',
 })
 
 // En Electron se guarda en un archivo de la app; en el navegador, en localStorage

@@ -36,6 +36,8 @@ function RightPanel({
   image,
   canEdit,
   library,
+  onServerFolder,
+  onPickServerFolder,
   onToggleTag,
   onAddTag,
   onRemoveTag,
@@ -148,6 +150,31 @@ function RightPanel({
         </ul>
         <NewItemForm placeholder="Nuevo álbum" onAdd={onAddAlbum} />
       </section>
+
+      {window.electronAPI && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Servidor</h2>
+          <input
+            key={library.serverFolder}
+            defaultValue={library.serverFolder}
+            onBlur={(e) => onServerFolder(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            placeholder="\\servidor\fotos"
+            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm outline-none focus:border-sky-400"
+          />
+          <button
+            type="button"
+            onClick={onPickServerFolder}
+            className="w-full rounded-lg bg-slate-700 px-3 py-1.5 text-sm transition hover:bg-slate-600"
+          >
+            Elegir carpeta…
+          </button>
+          <p className="text-xs text-slate-500">
+            Carpeta de red o unidad donde "Enviar al servidor" guarda las fotos. La original va a la
+            Papelera una vez copiada.
+          </p>
+        </section>
+      )}
     </aside>
   )
 }

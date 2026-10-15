@@ -30,6 +30,8 @@ function App() {
   const [loose, setLoose] = useState([])
   const [selected, setSelected] = useState(null) // { key, index }
   const [dragging, setDragging] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [notice, setNotice] = useState(null)
   const [library, setLibrary] = useState(EMPTY_LIBRARY)
   const libraryLoaded = useRef(false)
   const inputRef = useRef(null)
@@ -190,6 +192,12 @@ function App() {
     addFiles(e.dataTransfer.files)
   }
 
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(null), 4000)
+    return () => clearTimeout(timer)
+  }, [notice])
+
   const dropInAlbum = (albumId, file) => setLibrary((l) => addToAlbum(l, albumId, file))
 
   // Manda la foto a la Papelera. Si la carpeta está sincronizada con la nube, allí también se elimina.
@@ -206,7 +214,31 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
       window.alert('No se pudo eliminar la foto.')
       return
     }
-    const restantes = images.filter((i) => i.id !== file).length
+    removeFromViews(file)
+  }
+
+  // Envía la foto al servidor y la mueve: sale de la lista igual que si se eliminara
+  const sendToServer = async () => {
+    if (!current || selected.key === LOOSE || sending) return
+    if (!library.serverFolder) {
+      window.alert('Primero elige la carpeta del servidor en el panel derecho.')
+      return
+    }
+    const { id: file, name } = current
+    setSending(true)
+    try {
+      await api.sendToServer(file, library.serverFolder, true)
+      removeFromViews(file)
+      setNotice(`"${name}" enviada al servidor`)
+    } catch (err) {
+      window.alert(err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  // Quita una foto que ya no está en el disco de todas las listas
+  const removeFromViews = (file) => {
     const folder = file.replace(/[\\/][^\\/]*$/, '')
     setFilesByKey((prev) =>
       Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.filter((i) => i.id !== file)])),
@@ -215,7 +247,14 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
       prev.map((f) => (f.path === folder ? { ...f, count: f.count - 1 } : f)).filter((f) => f.count > 0),
     )
     setLibrary((l) => forgetImage(l, file))
-    setSelected(restantes ? { key: selected.key, index: Math.min(selected.index, restantes - 1) } : null)
+    setSelected((s) => {
+      const list = s ? (allFiles[s.key] ?? []) : []
+      const at = list.findIndex((i) => i.id === file)
+      if (at === -1) return s
+      if (list.length === 1) return null
+      const index = at < s.index ? s.index - 1 : s.index
+      return { key: s.key, index: Math.min(index, list.length - 2) }
+    })
   }
 
   const canEdit = Boolean(current) && selected.key !== LOOSE
@@ -265,7 +304,7 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
         }}
       />
 
-      <main className="min-w-0 flex-1">
+      <main className="relative min-w-0 flex-1">
         {current ? (
           <Viewer
             image={current}
@@ -273,6 +312,8 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
             total={images.length}
             persistent={canEdit}
             onDelete={deleteImage}
+            onSend={api ? sendToServer : undefined}
+            sending={sending}
             onPrev={prev}
             onNext={next}
           />
@@ -292,12 +333,22 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
             </div>
           </div>
         )}
+        {notice && (
+          <p className="absolute bottom-6 left-1/2 -translate-x-1/2 rounded-lg bg-emerald-600 px-4 py-2 text-sm text-white shadow-lg">
+            {notice}
+          </p>
+        )}
       </main>
 
       <RightPanel
         image={current}
         canEdit={canEdit}
         library={library}
+        onServerFolder={(folder) => setLibrary((l) => ({ ...l, serverFolder: folder.trim() }))}
+        onPickServerFolder={async () => {
+          const [folder] = await api.selectFolders()
+          if (folder) setLibrary((l) => ({ ...l, serverFolder: folder }))
+        }}
         onToggleTag={(tagId) => setLibrary((l) => toggleImageTag(l, current.id, tagId))}
         onAddTag={(name) => setLibrary((l) => addTag(l, name))}
         onRemoveTag={(tagId) => setLibrary((l) => removeTag(l, tagId))}

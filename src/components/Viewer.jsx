@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { startImageDrag } from '../dnd'
 
 // persistent: la foto es un archivo del disco (no una imagen suelta)
-function Viewer({ image, index, total, persistent, onPrev, onNext, onDelete }) {
+function Viewer({ image, index, total, persistent, sending, onPrev, onNext, onDelete, onSend }) {
   const api = window.electronAPI
   const needsCheck = persistent && Boolean(api)
   const [info, setInfo] = useState(null) // { id, exists, cloud }
@@ -58,12 +58,24 @@ function Viewer({ image, index, total, persistent, onPrev, onNext, onDelete }) {
           <p className="text-sm text-slate-400">
             {index + 1} / {total}
           </p>
+          {persistent && onSend && (
+            <button
+              type="button"
+              title="Mover al servidor"
+              disabled={sending}
+              onClick={onSend}
+              className="rounded-lg bg-sky-500/15 px-3 py-1 text-sm text-sky-300 transition hover:bg-sky-500 hover:text-white disabled:opacity-50"
+            >
+              {sending ? 'Enviando…' : '📤 Enviar al servidor'}
+            </button>
+          )}
           {persistent && (
             <button
               type="button"
               title="Eliminar (Supr)"
+              disabled={sending}
               onClick={onDelete}
-              className="rounded-lg bg-red-500/15 px-3 py-1 text-sm text-red-300 transition hover:bg-red-500 hover:text-white"
+              className="rounded-lg bg-red-500/15 px-3 py-1 text-sm text-red-300 transition hover:bg-red-500 hover:text-white disabled:opacity-50"
             >
               🗑 Eliminar
             </button>

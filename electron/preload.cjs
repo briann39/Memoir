@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveLibrary: (library) => ipcRenderer.invoke('library-save', library),
   fileInfo: (file) => ipcRenderer.invoke('file-info', file),
   thumbnail: (file, size) => ipcRenderer.invoke('thumbnail', file, size),
+  sendToServer: (file, destDir, move) => ipcRenderer.invoke('send-to-server', file, destDir, move),
   trashFile: (file) => ipcRenderer.invoke('trash-file', file),
   readFolder: (folder) => ipcRenderer.invoke('read-folder', folder),
   onScanBatch: (cb) => {
