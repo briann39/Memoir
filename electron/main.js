@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, net, nativeImage, protocol, shell } from 'electron'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -189,6 +189,18 @@ app.whenReady().then(() => {
       return { exists: true, cloud: isCloudOnly(await fs.stat(file)) }
     } catch {
       return { exists: false, cloud: false }
+    }
+  })
+
+  // Vista previa de una foto. Windows la pide a la miniatura que ya tiene (o que le da iCloud),
+  // así que no descarga la foto completa.
+  ipcMain.handle('thumbnail', async (_event, file, size) => {
+    if (!path.isAbsolute(file) || !isImage(file) || !nativeImage.createThumbnailFromPath) return null
+    try {
+      const thumb = await nativeImage.createThumbnailFromPath(file, { width: size, height: size })
+      return 'data:image/jpeg;base64,' + thumb.toJPEG(85).toString('base64')
+    } catch {
+      return null
     }
   })
 

@@ -6,6 +6,7 @@ function Viewer({ image, index, total, persistent, onPrev, onNext, onDelete }) {
   const api = window.electronAPI
   const needsCheck = persistent && Boolean(api)
   const [info, setInfo] = useState(null) // { id, exists, cloud }
+  const [preview, setPreview] = useState(null) // { id, url } vista previa de una foto en la nube
   const [revealed, setRevealed] = useState(null) // foto en la nube que el usuario decidió descargar
 
   useEffect(() => {
@@ -35,6 +36,20 @@ function Viewer({ image, index, total, persistent, onPrev, onNext, onDelete }) {
   const missing = needsCheck && checked && !info.exists
   const cloudOnly = needsCheck && checked && info.exists && info.cloud && revealed !== image.id
 
+  // Vista previa de las fotos en la nube, sin descargarlas
+  useEffect(() => {
+    if (!cloudOnly) return
+    let stale = false
+    api.thumbnail(image.id, 1024).then((url) => {
+      if (!stale) setPreview({ id: image.id, url })
+    })
+    return () => {
+      stale = true
+    }
+  }, [api, image.id, cloudOnly])
+
+  const previewUrl = preview?.id === image.id ? preview.url : null
+
   return (
     <div className="relative flex h-full flex-col">
       <div className="flex items-center justify-between gap-4 border-b border-slate-800 px-6 py-3">
@@ -60,21 +75,30 @@ function Viewer({ image, index, total, persistent, onPrev, onNext, onDelete }) {
         {!checked ? null : missing ? (
           <p className="text-slate-400">Este archivo ya no existe en el disco.</p>
         ) : cloudOnly ? (
-          <div className="flex flex-col items-center gap-3 text-center">
-            <span className="text-6xl" aria-hidden>
-              ☁️
-            </span>
-            <p className="font-medium">Esta foto está solo en la nube</p>
-            <p className="max-w-xs text-sm text-slate-400">
-              Verla la descargará a tu PC y ocupará espacio. Puedes eliminarla sin descargarla.
-            </p>
-            <button
-              type="button"
-              onClick={() => setRevealed(image.id)}
-              className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-sky-400"
-            >
-              Descargar y ver
-            </button>
+          <div className="flex h-full w-full flex-col items-center gap-4">
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt={image.name}
+                className="min-h-0 max-w-full flex-1 rounded-lg object-contain"
+              />
+            ) : (
+              <span className="m-auto text-6xl" aria-hidden>
+                ☁️
+              </span>
+            )}
+            <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 text-sm">
+              <span className="text-slate-400">
+                ☁️ {previewUrl ? 'Vista previa' : 'Solo en la nube'} · la foto completa no está en tu PC
+              </span>
+              <button
+                type="button"
+                onClick={() => setRevealed(image.id)}
+                className="rounded-lg bg-sky-500 px-3 py-1.5 font-medium text-white transition hover:bg-sky-400"
+              >
+                Descargar y ver completa
+              </button>
+            </div>
           </div>
         ) : (
           <img
