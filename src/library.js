@@ -91,6 +91,15 @@ export function removeAlbum(lib, albumId) {
   return { ...lib, albums: lib.albums.filter((a) => a.id !== albumId) }
 }
 
+export function addToAlbum(lib, albumId, file) {
+  return {
+    ...lib,
+    albums: lib.albums.map((a) =>
+      a.id === albumId && !a.images.includes(file) ? { ...a, images: [...a.images, file] } : a,
+    ),
+  }
+}
+
 export function toggleInAlbum(lib, albumId, file) {
   return {
     ...lib,

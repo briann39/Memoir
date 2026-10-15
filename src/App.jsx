@@ -5,6 +5,7 @@ import Viewer from './components/Viewer'
 import {
   addAlbum,
   addTag,
+  addToAlbum,
   EMPTY_LIBRARY,
   hideFolder,
   imageFromPath,
@@ -89,6 +90,7 @@ function App() {
         count: a.images.length,
         virtual: true,
         icon: '📒',
+        albumId: a.id,
       })),
     [library.albums],
   )
@@ -187,6 +189,8 @@ function App() {
     addFiles(e.dataTransfer.files)
   }
 
+  const dropInAlbum = (albumId, file) => setLibrary((l) => addToAlbum(l, albumId, file))
+
   const canEdit = Boolean(current) && selected.key !== LOOSE
 
   return (
@@ -194,7 +198,7 @@ function App() {
       className="flex h-screen bg-slate-900 text-slate-100"
       onDragOver={(e) => {
         e.preventDefault()
-        setDragging(true)
+        if (e.dataTransfer.types.includes('Files')) setDragging(true)
       }}
       onDragLeave={(e) => {
         if (e.currentTarget === e.target) setDragging(false)
@@ -214,6 +218,7 @@ function App() {
         selected={selected}
         onToggle={toggleFolder}
         onHide={discardFolder}
+        onDropImage={dropInAlbum}
         onRestore={(folder) => setLibrary((l) => restoreFolder(l, folder))}
         onPick={(key, index) => setSelected({ key, index })}
         onStop={stop}
@@ -239,6 +244,7 @@ function App() {
             image={current}
             index={selected.index}
             total={images.length}
+            canDrag={canEdit}
             onPrev={prev}
             onNext={next}
           />
@@ -268,6 +274,7 @@ function App() {
         onAddTag={(name) => setLibrary((l) => addTag(l, name))}
         onRemoveTag={(tagId) => setLibrary((l) => removeTag(l, tagId))}
         onToggleAlbum={(albumId) => setLibrary((l) => toggleInAlbum(l, albumId, current.id))}
+        onDropImage={dropInAlbum}
         onAddAlbum={(name) => setLibrary((l) => addAlbum(l, name))}
         onRemoveAlbum={(albumId) => setLibrary((l) => removeAlbum(l, albumId))}
       />

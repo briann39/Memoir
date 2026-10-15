@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { dropTarget } from '../dnd'
 import { TAG_COLORS } from '../library'
 
 function NewItemForm({ placeholder, onAdd }) {
@@ -41,7 +42,9 @@ function RightPanel({
   onToggleAlbum,
   onAddAlbum,
   onRemoveAlbum,
+  onDropImage,
 }) {
+  const [dropId, setDropId] = useState(null) // álbum sobre el que está el cursor al arrastrar
   const imageTags = (canEdit && library.imageTags[image.id]) || []
 
   return (
@@ -107,7 +110,16 @@ function RightPanel({
             <li className="text-sm text-slate-500">Crea álbumes para agrupar tus fotos.</li>
           )}
           {library.albums.map((album) => (
-            <li key={album.id} className="group flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-slate-800">
+            <li
+              key={album.id}
+              className={`group flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-slate-800 ${
+                dropId === album.id ? 'bg-sky-500/20 ring-1 ring-sky-400' : ''
+              }`}
+              {...dropTarget(
+                (over) => setDropId(over ? album.id : null),
+                (file) => onDropImage(album.id, file),
+              )}
+            >
               <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
                 <input
                   type="checkbox"

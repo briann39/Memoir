@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { dropTarget, startImageDrag } from '../dnd'
 
 function SectionTitle({ children }) {
   return (
@@ -22,6 +23,7 @@ function Sidebar({
   onToggle,
   onHide,
   onRestore,
+  onDropImage,
   onPick,
   onStop,
   onRescan,
@@ -30,6 +32,7 @@ function Sidebar({
 }) {
   const [query, setQuery] = useState('')
   const [showHidden, setShowHidden] = useState(false)
+  const [dropKey, setDropKey] = useState(null) // álbum sobre el que está el cursor al arrastrar
 
   const term = query.trim().toLowerCase()
   const visible = folders
@@ -43,7 +46,16 @@ function Sidebar({
     const files = filesByKey[f.path]
     return (
       <div key={f.path}>
-        <div className="group flex items-center rounded-lg transition hover:bg-slate-800">
+        <div
+          className={`group flex items-center rounded-lg transition hover:bg-slate-800 ${
+            dropKey === f.path ? 'bg-sky-500/20 ring-1 ring-sky-400' : ''
+          }`}
+          {...(f.albumId &&
+            dropTarget(
+              (over) => setDropKey(over ? f.path : null),
+              (file) => onDropImage(f.albumId, file),
+            ))}
+        >
           <button
             type="button"
             title={f.virtual ? f.name : f.path}
@@ -82,6 +94,8 @@ function Sidebar({
                   <button
                     type="button"
                     title={img.name}
+                    draggable={f.path !== '__loose__'}
+                    onDragStart={(e) => startImageDrag(e, img.id)}
                     onClick={() => onPick(f.path, i)}
                     className={`block w-full truncate rounded px-3 py-1 text-left text-xs transition hover:bg-slate-800 ${
                       active ? 'bg-slate-800 text-sky-400' : 'text-slate-300'

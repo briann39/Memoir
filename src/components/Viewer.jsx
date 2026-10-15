@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
+import { startImageDrag } from '../dnd'
 
-function Viewer({ image, index, total, onPrev, onNext }) {
+function Viewer({ image, index, total, canDrag, onPrev, onNext }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.target instanceof HTMLInputElement) return
@@ -25,6 +26,8 @@ function Viewer({ image, index, total, onPrev, onNext }) {
           key={image.id}
           src={image.url}
           alt={image.name}
+          draggable={canDrag}
+          onDragStart={(e) => startImageDrag(e, image.id)}
           className="max-h-full max-w-full rounded-lg object-contain"
         />
         {total > 1 && (
