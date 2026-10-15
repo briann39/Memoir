@@ -30,6 +30,9 @@ protocol.registerSchemesAsPrivileged([
 // Consultar sus metadatos no lo descarga; abrirlo sí.
 const isCloudOnly = (stat) => process.platform === 'win32' && stat.size > 0 && stat.blocks === 0
 
+// En el servidor, las personas y las mascotas van en carpetas principales distintas
+const KIND_DIRS = { personas: 'Personas', mascotas: 'Mascotas' }
+
 // La carpeta del servidor debe ser una ruta absoluta a la que se pueda llegar
 async function checkServerDir(serverDir) {
   if (!path.isAbsolute(serverDir)) throw new Error('Elige primero la carpeta del servidor.')
@@ -225,21 +228,34 @@ app.whenReady().then(() => {
     }
   })
 
-  // Subcarpetas que ya existen en el servidor (una por persona o animal)
+  // Carpetas que ya existen en el servidor: una por persona y una por mascota
   ipcMain.handle('server-folders', async (_event, serverDir) => {
-    const entries = await fs.readdir(await checkServerDir(serverDir), { withFileTypes: true })
-    return entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !e.name.startsWith('$'))
-      .map((e) => e.name)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    const root = await checkServerDir(serverDir)
+    const dirsIn = async (dir) => {
+      const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => [])
+      return entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !e.name.startsWith('$'))
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    }
+    const reservadas = Object.values(KIND_DIRS).map((d) => d.toLowerCase())
+    return {
+      personas: await dirsIn(path.join(root, KIND_DIRS.personas)),
+      mascotas: await dirsIn(path.join(root, KIND_DIRS.mascotas)),
+      otras: (await dirsIn(root)).filter((n) => !reservadas.includes(n.toLowerCase())),
+    }
   })
 
   // Copia la foto a la carpeta del servidor (una ruta de red o una unidad) y, si se pide, la mueve:
   // la original va a la Papelera solo cuando la copia quedó completa.
-  // subfolder: carpeta dentro del servidor (una persona, un animal…); vacío = la raíz. Se crea si no existe.
-  ipcMain.handle('send-to-server', async (_event, file, serverDir, subfolder, move) => {
+  // kind: 'personas' | 'mascotas' | 'otras' | '' (raíz). name: la carpeta de esa persona o mascota.
+  // Se crea si no existe.
+  ipcMain.handle('send-to-server', async (_event, file, serverDir, kind, name, move) => {
     if (!path.isAbsolute(file) || !isImage(file)) throw new Error('Ruta no válida')
-    const destDir = path.join(await checkServerDir(serverDir), safeFolderName(subfolder))
+    if (kind && kind !== 'otras' && !KIND_DIRS[kind]) throw new Error('Tipo de carpeta no válido')
+    const folder = safeFolderName(name)
+    if (kind && !folder) throw new Error('Falta el nombre de la carpeta')
+    const destDir = path.join(await checkServerDir(serverDir), KIND_DIRS[kind] ?? '', folder)
     await fs.mkdir(destDir, { recursive: true })
     const ext = path.extname(file)
     const base = path.basename(file, ext)

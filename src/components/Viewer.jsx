@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { startImageDrag } from '../dnd'
 
 // persistent: la foto es un archivo del disco (no una imagen suelta)
-function Viewer({ image, index, total, persistent, sending, onPrev, onNext, onDelete, onSend }) {
+function Viewer({ image, index, total, persistent, sending, marked, onPrev, onNext, onDelete, onSend, onToggleMark }) {
   const api = window.electronAPI
   const needsCheck = persistent && Boolean(api)
   const [info, setInfo] = useState(null) // { id, exists, cloud }
@@ -15,10 +15,14 @@ function Viewer({ image, index, total, persistent, sending, onPrev, onNext, onDe
       if (e.key === 'ArrowLeft') onPrev()
       if (e.key === 'ArrowRight') onNext()
       if (e.key === 'Delete' && persistent) onDelete()
+      if (e.key === ' ' && persistent && !(e.target instanceof HTMLButtonElement)) {
+        e.preventDefault()
+        onToggleMark()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onPrev, onNext, onDelete, persistent])
+  }, [onPrev, onNext, onDelete, onToggleMark, persistent])
 
   // Antes de cargar la imagen se mira si está solo en la nube: abrirla la descargaría
   useEffect(() => {
@@ -58,6 +62,22 @@ function Viewer({ image, index, total, persistent, sending, onPrev, onNext, onDe
           <p className="text-sm text-slate-400">
             {index + 1} / {total}
           </p>
+          {persistent && (
+            <label
+              title="Marcar para enviar (barra espaciadora)"
+              className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-1 text-sm transition ${
+                marked ? 'bg-sky-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={marked}
+                onChange={onToggleMark}
+                className="accent-sky-500"
+              />
+              Marcar
+            </label>
+          )}
           {persistent && onSend && (
             <button
               type="button"

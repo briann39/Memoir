@@ -40,6 +40,9 @@ export function saveLibrary(lib) {
   }
 }
 
+// Clave de un destino en el servidor; sirve para recordar el último usado
+export const targetKey = (kind, name) => `${kind}/${name}`
+
 export function imageFromPath(file) {
   return {
     id: file,

@@ -24,6 +24,14 @@ function Sidebar({
   onHide,
   onRestore,
   onDropImage,
+  marked,
+  markedCount,
+  sending,
+  progress,
+  onToggleMark,
+  onMarkAll,
+  onSendMarked,
+  onClearMarks,
   onPick,
   onStop,
   onRescan,
@@ -44,6 +52,7 @@ function Sidebar({
   const renderEntry = (f) => {
     const isOpen = expanded.has(f.path)
     const files = filesByKey[f.path]
+    const canMark = f.path !== '__loose__' // las imágenes sueltas no tienen ruta en el disco
     return (
       <div key={f.path}>
         <div
@@ -87,17 +96,39 @@ function Sidebar({
           <ul className="mb-1 ml-5 border-l border-slate-800 pl-2">
             {!files && <li className="px-3 py-1 text-xs text-slate-500">Cargando…</li>}
             {files?.length === 0 && <li className="px-3 py-1 text-xs text-slate-500">Vacío</li>}
+            {canMark && files?.length > 0 && (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => onMarkAll(files, !files.every((img) => marked.has(img.id)))}
+                  className="w-full rounded px-3 py-1 text-left text-xs text-sky-400 transition hover:bg-slate-800"
+                >
+                  {files.every((img) => marked.has(img.id))
+                    ? 'Desmarcar todas'
+                    : `Marcar todas (${files.length})`}
+                </button>
+              </li>
+            )}
             {files?.map((img, i) => {
               const active = selected?.key === f.path && selected.index === i
               return (
-                <li key={img.id}>
+                <li key={img.id} className="flex items-center">
+                  {canMark && (
+                    <input
+                      type="checkbox"
+                      aria-label={`Marcar ${img.name}`}
+                      checked={marked.has(img.id)}
+                      onChange={() => onToggleMark(img.id)}
+                      className="ml-1 shrink-0 accent-sky-500"
+                    />
+                  )}
                   <button
                     type="button"
                     title={img.name}
-                    draggable={f.path !== '__loose__'}
+                    draggable={canMark}
                     onDragStart={(e) => startImageDrag(e, img.id)}
                     onClick={() => onPick(f.path, i)}
-                    className={`flex w-full items-center gap-1 rounded px-3 py-1 text-left text-xs transition hover:bg-slate-800 ${
+                    className={`flex min-w-0 flex-1 items-center gap-1 rounded px-2 py-1 text-left text-xs transition hover:bg-slate-800 ${
                       active ? 'bg-slate-800 text-sky-400' : 'text-slate-300'
                     }`}
                   >
@@ -226,6 +257,34 @@ function Sidebar({
           </>
         )}
       </nav>
+
+      {markedCount > 0 && (
+        <div className="space-y-2 border-t border-slate-800 bg-slate-900 p-3">
+          <p className="text-sm">
+            {sending && progress
+              ? `Enviando ${progress.done} de ${progress.total}…`
+              : `${markedCount} ${markedCount === 1 ? 'foto marcada' : 'fotos marcadas'}`}
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={sending}
+              onClick={onSendMarked}
+              className="flex-1 rounded-lg bg-sky-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-400 disabled:opacity-50"
+            >
+              📤 Enviar
+            </button>
+            <button
+              type="button"
+              disabled={sending}
+              onClick={onClearMarks}
+              className="rounded-lg border border-slate-700 px-3 py-2 text-sm transition hover:bg-slate-800 disabled:opacity-50"
+            >
+              Limpiar
+            </button>
+          </div>
+        </div>
+      )}
     </aside>
   )
 }

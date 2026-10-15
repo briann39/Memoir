@@ -10,6 +10,7 @@ import {
   addToAlbum,
   EMPTY_LIBRARY,
   forgetImage,
+  targetKey,
   hideFolder,
   imageFromPath,
   loadLibrary,
@@ -33,7 +34,9 @@ function App() {
   const [selected, setSelected] = useState(null) // { key, index }
   const [dragging, setDragging] = useState(false)
   const [sending, setSending] = useState(false)
-  const [sendDialog, setSendDialog] = useState(false)
+  const [sendJob, setSendJob] = useState(null) // fotos que esperan que se elija la carpeta del servidor
+  const [progress, setProgress] = useState(null) // { done, total } mientras se envía
+  const [marked, setMarked] = useState(() => new Set()) // fotos marcadas para enviar
   const [notice, setNotice] = useState(null)
   const [library, setLibrary] = useState(EMPTY_LIBRARY)
   const libraryLoaded = useRef(false)
@@ -133,6 +136,7 @@ function App() {
     setExpanded(new Set())
     setFilesByKey({})
     setSelected(null)
+    setMarked(new Set())
     startScan()
   }
 
@@ -217,54 +221,108 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
       window.alert('No se pudo eliminar la foto.')
       return
     }
-    removeFromViews(file)
+    removeFromViews([file])
   }
 
-  // Abre el selector de carpeta del servidor (persona o animal) para la foto actual
-  const openSendDialog = () => {
-    if (!current || selected.key === LOOSE || sending) return
+  const toggleMark = (file) =>
+    setMarked((prev) => {
+      const next = new Set(prev)
+      if (next.has(file)) next.delete(file)
+      else next.add(file)
+      return next
+    })
+
+  const markAll = (files, on) =>
+    setMarked((prev) => {
+      const next = new Set(prev)
+      for (const img of files) {
+        if (on) next.add(img.id)
+        else next.delete(img.id)
+      }
+      return next
+    })
+
+  // Abre el selector de carpeta del servidor (persona o mascota) para esas fotos
+  const startSend = (files) => {
+    if (!files.length || sending) return
     if (!library.serverFolder) {
       window.alert('Primero elige la carpeta del servidor en el panel derecho.')
       return
     }
-    setSendDialog(true)
+    setSendJob(files)
   }
 
-  // Envía la foto a la carpeta elegida y la mueve: sale de la lista igual que si se eliminara
-  const sendToServer = async (subfolder) => {
-    if (!current || selected.key === LOOSE || sending) return
-    setSendDialog(false)
-    const { id: file, name } = current
+  const sendCurrent = () => {
+    if (current && selected.key !== LOOSE) startSend([current.id])
+  }
+
+  // Envía una por una las fotos a la carpeta elegida y las mueve: salen de las listas igual que al eliminar
+  const sendToServer = async (kind, name) => {
+    const files = sendJob
+    setSendJob(null)
     setSending(true)
-    try {
-      await api.sendToServer(file, library.serverFolder, subfolder, true)
-      setLibrary((l) => ({ ...l, lastSubfolder: subfolder }))
-      removeFromViews(file)
-      setNotice(`"${name}" enviada a ${subfolder || 'la raíz del servidor'}`)
-    } catch (err) {
-      window.alert(cleanError(err))
-    } finally {
-      setSending(false)
+    setProgress({ done: 0, total: files.length })
+    const sent = []
+    let failure = null
+    for (const file of files) {
+      try {
+        await api.sendToServer(file, library.serverFolder, kind, name, true)
+        sent.push(file)
+        setProgress({ done: sent.length, total: files.length })
+      } catch (err) {
+        failure = cleanError(err)
+        break
+      }
+    }
+    if (sent.length) {
+      setLibrary((l) => ({ ...l, lastSubfolder: targetKey(kind, name) }))
+      removeFromViews(sent)
+    }
+    setSending(false)
+    setProgress(null)
+
+    const destino = name || 'la raíz del servidor'
+    if (failure) {
+      window.alert(
+        sent.length ? `Se enviaron ${sent.length} de ${files.length} fotos a ${destino}.\n\n${failure}` : failure,
+      )
+    } else if (sent.length === 1) {
+      setNotice(`"${sent[0].split(/[\\/]/).pop()}" enviada a ${destino}`)
+    } else {
+      setNotice(`${sent.length} fotos enviadas a ${destino}`)
     }
   }
 
-  // Quita una foto que ya no está en el disco de todas las listas
-  const removeFromViews = (file) => {
-    const folder = file.replace(/[\\/][^\\/]*$/, '')
+  // Quita fotos que ya no están en el disco de todas las listas
+  const removeFromViews = (files) => {
+    const gone = new Set(files)
     setFilesByKey((prev) =>
-      Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.filter((i) => i.id !== file)])),
+      Object.fromEntries(Object.entries(prev).map(([key, list]) => [key, list.filter((i) => !gone.has(i.id))])),
     )
-    setFolders((prev) =>
-      prev.map((f) => (f.path === folder ? { ...f, count: f.count - 1 } : f)).filter((f) => f.count > 0),
-    )
-    setLibrary((l) => forgetImage(l, file))
+    setFolders((prev) => {
+      const removed = {}
+      for (const file of files) {
+        const dir = file.replace(/[\\/][^\\/]*$/, '')
+        removed[dir] = (removed[dir] ?? 0) + 1
+      }
+      return prev
+        .map((f) => (removed[f.path] ? { ...f, count: f.count - removed[f.path] } : f))
+        .filter((f) => f.count > 0)
+    })
+    setLibrary((l) => files.reduce((lib, file) => forgetImage(lib, file), l))
+    setMarked((prev) => new Set([...prev].filter((file) => !gone.has(file))))
     setSelected((s) => {
-      const list = s ? (allFiles[s.key] ?? []) : []
-      const at = list.findIndex((i) => i.id === file)
-      if (at === -1) return s
-      if (list.length === 1) return null
-      const index = at < s.index ? s.index - 1 : s.index
-      return { key: s.key, index: Math.min(index, list.length - 2) }
+      if (!s) return s
+      const list = allFiles[s.key] ?? []
+      const open = list[s.index]
+      const kept = list.filter((i) => !gone.has(i.id))
+      if (open && !gone.has(open.id)) {
+        // sigue la misma foto, aunque cambie su posición en la lista
+        return { ...s, index: kept.findIndex((i) => i.id === open.id) }
+      }
+      if (!kept.length) return null
+      const before = list.slice(0, s.index).filter((i) => !gone.has(i.id)).length
+      return { key: s.key, index: Math.min(before, kept.length - 1) }
     })
   }
 
@@ -297,6 +355,14 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
         onHide={discardFolder}
         onDropImage={dropInAlbum}
         onRestore={(folder) => setLibrary((l) => restoreFolder(l, folder))}
+        marked={marked}
+        markedCount={marked.size}
+        sending={sending}
+        progress={progress}
+        onToggleMark={toggleMark}
+        onMarkAll={markAll}
+        onSendMarked={() => startSend([...marked])}
+        onClearMarks={() => setMarked(new Set())}
         onPick={(key, index) => setSelected({ key, index })}
         onStop={stop}
         onRescan={rescan}
@@ -323,7 +389,9 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
             total={images.length}
             persistent={canEdit}
             onDelete={deleteImage}
-            onSend={api ? openSendDialog : undefined}
+            marked={marked.has(current.id)}
+            onToggleMark={() => toggleMark(current.id)}
+            onSend={api ? sendCurrent : undefined}
             sending={sending}
             onPrev={prev}
             onNext={next}
@@ -369,12 +437,13 @@ Se enviará a la Papelera de reciclaje. Si está en una carpeta de iCloud, tambi
         onRemoveAlbum={(albumId) => setLibrary((l) => removeAlbum(l, albumId))}
       />
 
-      {sendDialog && (
+      {sendJob && (
         <SendDialog
           serverFolder={library.serverFolder}
           lastUsed={library.lastSubfolder}
+          count={sendJob.length}
           onPick={sendToServer}
-          onClose={() => setSendDialog(false)}
+          onClose={() => setSendJob(null)}
         />
       )}
     </div>
